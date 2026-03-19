@@ -7,23 +7,38 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.security import normalize_multiline_text, normalize_text, validate_email
 
 DIFFICULTIES = {"Easy", "Medium", "Hard"}
 PROBLEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
-class LoginRequest(BaseModel):
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class LoginRequest(StrictModel):
     email: str
-    password: str
+    password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_field(cls, value: str) -> str:
+        return validate_email(value)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_field(cls, value: str) -> str:
+        return normalize_text(value, "password", max_length=128)
 
 
-class LoginResponse(BaseModel):
+class LoginResponse(StrictModel):
     token: str
     user_id: str
     role: str
 
 
-class ProblemSummary(BaseModel):
+class ProblemSummary(StrictModel):
     problem_id: str
     title: str
     prompt: str
@@ -35,17 +50,29 @@ class ProblemSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ProblemListResponse(BaseModel):
+class ProblemListResponse(StrictModel):
     problems: list[ProblemSummary]
 
 
-class SubmissionRequest(BaseModel):
-    problem_id: str
-    code: str
+class SubmissionRequest(StrictModel):
+    problem_id: str = Field(min_length=1, max_length=100)
+    code: str = Field(min_length=1, max_length=10000)
     timed_mode: bool = False
 
+    @field_validator("problem_id")
+    @classmethod
+    def validate_problem_identifier(cls, value: str) -> str:
+        if not PROBLEM_ID_PATTERN.fullmatch(value):
+            raise ValueError("problem_id may only contain letters, numbers, underscores, and hyphens.")
+        return value
 
-class SubmissionResponse(BaseModel):
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, value: str) -> str:
+        return normalize_multiline_text(value, "code", max_length=10000)
+
+
+class SubmissionResponse(StrictModel):
     submission_id: str
     result: str
     failure_category: Optional[str]
@@ -57,7 +84,7 @@ class SubmissionResponse(BaseModel):
     feedback: str
 
 
-class HintResponse(BaseModel):
+class HintResponse(StrictModel):
     problem_id: str
     unlocked_stage: int
     conceptual: Optional[str]
@@ -65,7 +92,7 @@ class HintResponse(BaseModel):
     syntactic: Optional[str]
 
 
-class ProblemTestCasePayload(BaseModel):
+class ProblemTestCasePayload(StrictModel):
     input: list[Any]
     expected: Any
 
@@ -88,18 +115,28 @@ class ProblemTestCasePayload(BaseModel):
         return value
 
 
-class AnswerKeyPayload(BaseModel):
-    solution_code: str
-    explanation: str
+class AnswerKeyPayload(StrictModel):
+    solution_code: str = Field(min_length=1, max_length=10000)
+    explanation: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("solution_code")
+    @classmethod
+    def validate_solution_code(cls, value: str) -> str:
+        return normalize_multiline_text(value, "answer_key.solution_code", max_length=10000)
+
+    @field_validator("explanation")
+    @classmethod
+    def validate_explanation(cls, value: str) -> str:
+        return normalize_multiline_text(value, "answer_key.explanation", max_length=2000)
 
 
-class ProblemUploadPayload(BaseModel):
+class ProblemUploadPayload(StrictModel):
     problem_id: str = Field(min_length=1, max_length=100)
-    title: str
-    prompt: str
+    title: str = Field(min_length=1, max_length=200)
+    prompt: str = Field(min_length=1, max_length=4000)
     difficulty: str
     function_name: str
-    starter_code: Optional[str] = None
+    starter_code: Optional[str] = Field(default=None, max_length=10000)
     test_cases: list[ProblemTestCasePayload] = Field(min_length=1)
     hints: Optional[dict[str, str]] = None
     answer_key: Optional[AnswerKeyPayload] = None
@@ -125,6 +162,23 @@ class ProblemUploadPayload(BaseModel):
             raise ValueError("function_name must be a valid Python identifier.")
         return value
 
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        return normalize_text(value, "title", max_length=200)
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, value: str) -> str:
+        return normalize_multiline_text(value, "prompt", max_length=4000)
+
+    @field_validator("starter_code")
+    @classmethod
+    def validate_starter_code(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return normalize_multiline_text(value, "starter_code", max_length=10000)
+
     @field_validator("hints")
     @classmethod
     def validate_hints(cls, value: Optional[dict[str, str]]) -> Optional[dict[str, str]]:
@@ -137,18 +191,11 @@ class ProblemUploadPayload(BaseModel):
             raise ValueError("hints may only contain stages 1, 2, and 3.")
 
         for stage, content in value.items():
-            if not content.strip():
-                raise ValueError(f"hint stage {stage} must not be empty.")
+            value[stage] = normalize_multiline_text(content, f"hint stage {stage}", max_length=1200)
         return value
 
     @model_validator(mode="after")
     def validate_problem_shape(self) -> "ProblemUploadPayload":
-        if not self.title.strip():
-            raise ValueError("title must not be empty.")
-        if not self.prompt.strip():
-            raise ValueError("prompt must not be empty.")
-        if self.starter_code is not None and not self.starter_code.strip():
-            raise ValueError("starter_code must be omitted or contain code.")
         if self.answer_key is not None and self.function_name not in self.answer_key.solution_code:
             raise ValueError("answer_key.solution_code must contain the required function name.")
 
@@ -162,6 +209,6 @@ class ProblemUploadPayload(BaseModel):
         return self
 
 
-class ProblemUploadResponse(BaseModel):
+class ProblemUploadResponse(StrictModel):
     success: bool
     problem_id: str

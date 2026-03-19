@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+from typing import Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -25,7 +26,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def create_token(user: User) -> str:
     payload = f"{user.id}:{user.role}"
-    signature = hmac.new(settings.secret_key.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    signature = hmac.new(settings.secret_key_current.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     raw = f"{payload}:{signature}"
     return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("utf-8")
 
@@ -38,16 +39,23 @@ def decode_token(token: str) -> tuple[int, str]:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token.") from exc
 
     payload = f"{user_id_str}:{role}"
-    expected_signature = hmac.new(
-        settings.secret_key.encode("utf-8"),
-        payload.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-
-    if not hmac.compare_digest(signature, expected_signature):
+    if not any(
+        hmac.compare_digest(
+            signature,
+            hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest(),
+        )
+        for secret in [settings.secret_key_current, *settings.secret_key_previous]
+    ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token.")
 
     return int(user_id_str), role
+
+
+def try_decode_token(token: str) -> Optional[tuple[int, str]]:
+    try:
+        return decode_token(token)
+    except HTTPException:
+        return None
 
 
 def get_current_user(

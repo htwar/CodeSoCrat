@@ -31,6 +31,10 @@ class EvaluationResult:
 
 class DockerSandboxExecutor:
     def run(self, *, code: str, function_name: str, test_cases: list[tuple[list, object]]) -> EvaluationResult:
+        availability_error = self._check_docker_availability()
+        if availability_error is not None:
+            return availability_error
+
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             runner_path = temp_path / "runner.py"
@@ -43,16 +47,16 @@ class DockerSandboxExecutor:
                     command,
                     capture_output=True,
                     text=True,
-                    timeout=settings.evaluation_timeout_seconds + 1,
+                    timeout=settings.docker_startup_timeout_seconds,
                 )
             except subprocess.TimeoutExpired:
                 runtime_ms = int((time.perf_counter() - start) * 1000)
                 return EvaluationResult(
                     result="Fail",
-                    failure_category=FAILURE_TIMEOUT,
+                    failure_category=FAILURE_RUNTIME,
                     runtime_ms=runtime_ms,
                     memory_mb=self._memory_limit_mb(),
-                    feedback="Execution exceeded the allowed time limit in the Docker sandbox.",
+                    feedback="Docker sandbox startup timed out before execution completed.",
                     valid_attempt=False,
                 )
             except FileNotFoundError:
@@ -74,6 +78,8 @@ class DockerSandboxExecutor:
             "docker",
             "run",
             "--rm",
+            "--pull",
+            "never",
             "--network",
             "none",
             "--cpus",
@@ -98,6 +104,62 @@ class DockerSandboxExecutor:
             "-B",
             "/workspace/runner.py",
         ]
+
+    def _check_docker_availability(self) -> Optional[EvaluationResult]:
+        try:
+            info = subprocess.run(
+                ["docker", "info"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except subprocess.TimeoutExpired:
+            return EvaluationResult(
+                result="Fail",
+                failure_category=FAILURE_RUNTIME,
+                runtime_ms=0,
+                memory_mb=self._memory_limit_mb(),
+                feedback="Docker daemon did not respond in time.",
+                valid_attempt=False,
+            )
+        except FileNotFoundError:
+            return EvaluationResult(
+                result="Fail",
+                failure_category=FAILURE_RUNTIME,
+                runtime_ms=0,
+                memory_mb=self._memory_limit_mb(),
+                feedback="Docker is not installed on the server.",
+                valid_attempt=False,
+            )
+
+        if info.returncode != 0:
+            combined = "\n".join(part for part in [(info.stdout or "").strip(), (info.stderr or "").strip()] if part)
+            return EvaluationResult(
+                result="Fail",
+                failure_category=FAILURE_RUNTIME,
+                runtime_ms=0,
+                memory_mb=self._memory_limit_mb(),
+                feedback=combined or "Docker daemon is not available.",
+                valid_attempt=False,
+            )
+
+        image_check = subprocess.run(
+            ["docker", "image", "inspect", settings.docker_image],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        if image_check.returncode != 0:
+            return EvaluationResult(
+                result="Fail",
+                failure_category=FAILURE_RUNTIME,
+                runtime_ms=0,
+                memory_mb=self._memory_limit_mb(),
+                feedback=f"Docker image '{settings.docker_image}' is not available locally. Run: docker pull {settings.docker_image}",
+                valid_attempt=False,
+            )
+
+        return None
 
     def _classify_container_result(self, *, completed: subprocess.CompletedProcess[str], runtime_ms: int) -> EvaluationResult:
         stdout = (completed.stdout or "").strip()
@@ -181,7 +243,7 @@ class DockerSandboxExecutor:
                 "",
                 code.rstrip(),
                 "",
-                f"TEST_CASES = {serialized_cases}",
+                f"TEST_CASES = json.loads({serialized_cases!r})",
                 f"FUNCTION_NAME = {function_name!r}",
                 "",
                 "try:",

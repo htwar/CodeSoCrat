@@ -19,20 +19,25 @@ class BackendFlowTests(unittest.TestCase):
         from app.config import settings
 
         settings.database_url = os.environ["CODESOCRAT_DATABASE_URL"]
+        settings.rate_limit_window_seconds = 60
+        settings.rate_limit_ip_public = 60
+        settings.rate_limit_ip_authenticated = 120
+        settings.rate_limit_user_authenticated = 90
+        settings.login_rate_limit_ip = 10
+        settings.login_rate_limit_user = 5
 
         from app.database import Base, SessionLocal, engine
-        from app.main import app, evaluation_service
+        from app.main import app, evaluation_service, hint_service
+        from app.rate_limit import rate_limiter
         from app.services.evaluation import EvaluationResult
         from app.services.bootstrap import seed_default_users, seed_starter_problems
 
-        Base.metadata.drop_all(bind=engine)
-        Base.metadata.create_all(bind=engine)
-        db = SessionLocal()
-        try:
-            seed_default_users(db)
-            seed_starter_problems(db)
-        finally:
-            db.close()
+        cls.Base = Base
+        cls.SessionLocal = SessionLocal
+        cls.engine = engine
+        cls.seed_default_users = seed_default_users
+        cls.seed_starter_problems = seed_starter_problems
+        cls.rate_limiter = rate_limiter
 
         class FakeExecutor:
             def run(self, *, code: str, function_name: str, test_cases):
@@ -63,8 +68,24 @@ class BackendFlowTests(unittest.TestCase):
                     valid_attempt=True,
                 )
 
+        class FakeHintService:
+            def generate_hint(self, *, stage, context):
+                return f"generated-stage-{stage}"
+
         evaluation_service.executor = FakeExecutor()
+        hint_service.generate_hint = FakeHintService().generate_hint
         cls.client = TestClient(app)
+
+    def setUp(self) -> None:
+        self.rate_limiter._buckets.clear()
+        self.Base.metadata.drop_all(bind=self.engine)
+        self.Base.metadata.create_all(bind=self.engine)
+        db = self.SessionLocal()
+        try:
+            type(self).seed_default_users(db)
+            type(self).seed_starter_problems(db)
+        finally:
+            db.close()
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -100,7 +121,32 @@ class BackendFlowTests(unittest.TestCase):
 
         hints = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers"})
         self.assertEqual(hints.status_code, 200)
-        self.assertIsNotNone(hints.json()["conceptual"])
+        self.assertEqual(hints.json()["conceptual"], "generated-stage-1")
+
+    def test_syntax_failure_unlocks_only_syntactic_hint(self) -> None:
+        token = self._login("student@codesocrat.dev", "studentpass")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = self.client.post(
+            "/submissions",
+            headers=headers,
+            json={
+                "problem_id": "sum_two_numbers",
+                "code": "def add_numbers(a, b)\n    return a + b\n",
+                "timed_mode": False,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["result"], "Fail")
+        self.assertEqual(payload["failure_category"], "SyntaxError")
+        self.assertEqual(payload["hint_stage_unlocked"], 3)
+
+        hints = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(hints.status_code, 200)
+        self.assertIsNone(hints.json()["conceptual"])
+        self.assertIsNone(hints.json()["strategic"])
+        self.assertEqual(hints.json()["syntactic"], "generated-stage-3")
 
     def test_student_submission_passes(self) -> None:
         token = self._login("student@codesocrat.dev", "studentpass")
@@ -157,6 +203,32 @@ class BackendFlowTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 422)
+
+    def test_login_rejects_unexpected_fields(self) -> None:
+        response = self.client.post(
+            "/auth/login",
+            json={"email": "student@codesocrat.dev", "password": "studentpass", "role": "Author"},
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_submission_rejects_invalid_problem_id_shape(self) -> None:
+        token = self._login("student@codesocrat.dev", "studentpass")
+        headers = {"Authorization": f"Bearer {token}"}
+        response = self.client.post(
+            "/submissions",
+            headers=headers,
+            json={"problem_id": "../bad", "code": "print(1)", "timed_mode": False},
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_login_rate_limit_returns_429(self) -> None:
+        for _ in range(5):
+            response = self.client.post("/auth/login", json={"email": "student@codesocrat.dev", "password": "wrongpass"})
+            self.assertEqual(response.status_code, 401)
+
+        limited = self.client.post("/auth/login", json={"email": "student@codesocrat.dev", "password": "wrongpass"})
+        self.assertEqual(limited.status_code, 429)
+        self.assertIn("Retry-After", limited.headers)
 
 
 if __name__ == "__main__":

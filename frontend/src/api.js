@@ -1,19 +1,24 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
 async function request(path, options = {}) {
+  const { headers: customHeaders = {}, ...restOptions } = options;
   const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...restOptions,
     headers: {
       "Content-Type": "application/json",
-      ...(options.headers || {}),
+      ...customHeaders,
     },
-    ...options,
   });
 
   if (!response.ok) {
     let message = `Request failed with status ${response.status}`;
     try {
       const payload = await response.json();
-      message = payload.detail || payload.message || message;
+      if (Array.isArray(payload.detail)) {
+        message = payload.detail.map((item) => item.msg).join(", ");
+      } else {
+        message = payload.detail || payload.message || message;
+      }
     } catch (_error) {
       message = await response.text() || message;
     }

@@ -25,6 +25,8 @@ const starterUploadTemplate = `{
 
 const demoSolution = "def add_numbers(a, b):\n    return a + b\n";
 
+const SESSION_STORAGE_KEY = "codesocrat-session";
+
 function AuthPanel({ onLogin, loading, error }) {
   const [email, setEmail] = useState("student@codesocrat.dev");
   const [password, setPassword] = useState("studentpass");
@@ -228,7 +230,14 @@ function AuthorPanel({ token }) {
 }
 
 export default function App() {
-  const [session, setSession] = useState(null);
+  const [session, setSession] = useState(() => {
+    try {
+      const storedSession = window.localStorage.getItem(SESSION_STORAGE_KEY);
+      return storedSession ? JSON.parse(storedSession) : null;
+    } catch (_error) {
+      return null;
+    }
+  });
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [problems, setProblems] = useState([]);
@@ -236,6 +245,14 @@ export default function App() {
   const [codeByProblem, setCodeByProblem] = useState({});
   const [submissionState, setSubmissionState] = useState({ loading: false, result: null, error: "" });
   const [hintState, setHintState] = useState({ loading: false, hints: null, error: "" });
+
+  useEffect(() => {
+    if (session) {
+      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+      return;
+    }
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  }, [session]);
 
   useEffect(() => {
     if (!session?.token) {

@@ -1,6 +1,6 @@
-# CodeSoCrat Backend
+# CodeSoCrat
 
-This repository now contains a starter backend for the CodeSoCrat application described in the design document.
+This repository now contains a starter backend and a basic React frontend for the CodeSoCrat application described in the design document.
 
 ## What is implemented
 
@@ -15,6 +15,15 @@ This repository now contains a starter backend for the CodeSoCrat application de
 - Docker sandbox execution with no network access and resource limits
 - Hint unlocking and retrieval
 
+## Frontend
+
+- React + Vite frontend
+- Student login flow
+- Problem browser
+- Code editor and submission workspace
+- Result and hint display
+- Author-only JSON upload panel
+
 ## Seed accounts
 
 - Student: `student@codesocrat.dev` / `studentpass`
@@ -22,11 +31,50 @@ This repository now contains a starter backend for the CodeSoCrat application de
 
 ## Run locally
 
+Create env files first:
+
+```bash
+cp .env.example .env
+cp frontend/.env.example frontend/.env
+```
+
+Start the backend:
+
 ```bash
 python3 -m uvicorn app.main:app --reload --app-dir backend
 ```
 
-The API will start at `http://127.0.0.1:8000`.
+Then start the frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The API will start at `http://127.0.0.1:8000` and the React app will start at `http://127.0.0.1:5173`.
+
+## Environment files
+
+The backend now loads variables from a root `.env` file automatically.
+
+Important values:
+
+- `CODESOCRAT_SECRET_KEY_CURRENT`
+- `CODESOCRAT_SECRET_KEY_PREVIOUS`
+- `CODESOCRAT_OLLAMA_BASE_URL`
+- `CODESOCRAT_OLLAMA_MODEL`
+- `CODESOCRAT_RATE_LIMIT_*`
+
+The frontend uses `frontend/.env` for:
+
+- `VITE_API_BASE_URL`
+
+## Security Notes
+
+- The API now rejects unexpected request fields and applies stricter length and format validation to user input.
+- Rate limiting is enforced on public endpoints with IP-based limits and additional user-based limits for authenticated traffic and login attempts.
+- Session signing secrets are environment-driven. Rotate them by setting a new `CODESOCRAT_SECRET_KEY_CURRENT` and moving the prior value into `CODESOCRAT_SECRET_KEY_PREVIOUS`.
 
 ## Database schema
 

@@ -1,0 +1,8 @@
+.env
+.env.local
+codesocrat.db
+debug.db
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.pyc

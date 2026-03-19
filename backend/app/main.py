@@ -4,14 +4,15 @@ import json
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import create_token, get_current_user, require_author, verify_password
 from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
-from app.models import Hint, Problem, Submission, TestCase, User
+from app.models import Problem, Submission, TestCase, User
 from app.schemas import (
     HintResponse,
     LoginRequest,
@@ -25,11 +26,13 @@ from app.schemas import (
 )
 from app.services.bootstrap import persist_problem, seed_default_users, seed_starter_problems
 from app.services.evaluation import EvaluationService
-from app.services.hints import build_hint_response, generate_fallback_hint
+from app.services.hints import HintContext, OllamaHintService
 from app.services.progress import ProgressService
+from app.rate_limit import enforce_login_identity_rate_limit, enforce_rate_limit
 
 evaluation_service = EvaluationService()
 progress_service = ProgressService()
+hint_service = OllamaHintService()
 
 
 @asynccontextmanager
@@ -54,6 +57,16 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    # Apply a lightweight per-IP and per-user throttle before route execution.
+    try:
+        enforce_rate_limit(request)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers or {})
+    return await call_next(request)
+
+
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
@@ -61,6 +74,7 @@ def health_check() -> dict[str, str]:
 
 @app.post("/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
+    enforce_login_identity_rate_limit(payload.email)
     user = db.query(User).filter(User.email == payload.email).first()
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
@@ -70,7 +84,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse
 
 @app.get("/problems", response_model=ProblemListResponse)
 def list_problems(
-    difficulty: Optional[str] = Query(default=None),
+    difficulty: Optional[str] = Query(default=None, pattern="^(Easy|Medium|Hard)$"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProblemListResponse:
@@ -142,32 +156,45 @@ def submit_code(
 
 @app.get("/hints", response_model=HintResponse)
 def get_hints(
-    problem_id: str,
+    problem_id: str = Query(..., min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HintResponse:
-    problem = db.query(Problem).options(selectinload(Problem.hints)).filter(Problem.problem_id == problem_id).first()
+    problem = db.query(Problem).filter(Problem.problem_id == problem_id).first()
     if problem is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
 
     progress = progress_service.get_or_create(db, user=user, problem=problem)
-    if progress.unlocked_stage == 0:
+    unlocked_stages = progress_service.get_unlocked_stages(progress)
+    if not unlocked_stages:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No hints unlocked yet.")
 
-    existing_stages = {hint.stage for hint in problem.hints}
-    for stage in range(1, progress.unlocked_stage + 1):
-        if stage not in existing_stages:
-            db.add(
-                Hint(
-                    problem_id=problem.id,
-                    stage=stage,
-                    content=generate_fallback_hint(stage, progress.last_failure_category, problem),
-                )
-            )
-    db.commit()
-    problem = db.query(Problem).options(selectinload(Problem.hints)).filter(Problem.id == problem.id).first()
+    latest_submission = (
+        db.query(Submission)
+        .filter(Submission.user_id == user.id, Submission.problem_id == problem.id)
+        .order_by(Submission.created_at.desc(), Submission.id.desc())
+        .first()
+    )
 
-    return HintResponse.model_validate(build_hint_response(problem, progress))
+    context = HintContext(
+        problem=problem,
+        progress=progress,
+        latest_submission=latest_submission,
+    )
+
+    generated_hints: dict[int, str] = {}
+    try:
+        for stage in sorted(unlocked_stages):
+            generated_hints[stage] = hint_service.generate_hint(stage=stage, context=context)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+    payload = hint_service.build_hint_response(
+        unlocked_stages=unlocked_stages,
+        generated_hints=generated_hints,
+        problem=problem,
+    )
+    return HintResponse.model_validate(payload)
 
 
 @app.post("/author/problems/upload", response_model=ProblemUploadResponse)
