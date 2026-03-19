@@ -32,6 +32,33 @@ class LoginRequest(StrictModel):
         return normalize_text(value, "password", max_length=128)
 
 
+class RegisterRequest(StrictModel):
+    email: str
+    password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_field(cls, value: str) -> str:
+        return validate_email(value)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_field(cls, value: str) -> str:
+        return normalize_text(value, "password", max_length=128)
+
+    @field_validator("confirm_password")
+    @classmethod
+    def validate_confirm_password_field(cls, value: str) -> str:
+        return normalize_text(value, "confirm_password", max_length=128)
+
+    @model_validator(mode="after")
+    def validate_password_match(self) -> "RegisterRequest":
+        if self.password != self.confirm_password:
+            raise ValueError("password and confirm_password must match.")
+        return self
+
+
 class LoginResponse(StrictModel):
     token: str
     user_id: str
@@ -212,5 +239,10 @@ class ProblemUploadPayload(StrictModel):
 
 
 class ProblemUploadResponse(StrictModel):
+    success: bool
+    problem_id: str
+
+
+class ResetProgressResponse(StrictModel):
     success: bool
     problem_id: str

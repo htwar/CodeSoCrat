@@ -68,5 +68,129 @@
       "solution_code": "def is_even(n):\n    return n % 2 == 0\n",
       "explanation": "Modulo by 2 gives a remainder of 0 for even numbers, so the function returns whether that condition is true."
     }
+  },
+  {
+    "problem_id": "count_vowels",
+    "title": "Count Vowels",
+    "prompt": "Write a function named count_vowels(text) that returns the number of vowels in a string. Count both uppercase and lowercase vowels.",
+    "difficulty": "Medium",
+    "function_name": "count_vowels",
+    "starter_code": "def count_vowels(text):\n    # Write your code here\n    pass\n",
+    "test_cases": [
+      {
+        "input": ["hello"],
+        "expected": 2
+      },
+      {
+        "input": ["Sky"],
+        "expected": 0
+      },
+      {
+        "input": ["AEiou"],
+        "expected": 5
+      }
+    ],
+    "hints": {
+      "1": "You need to inspect each character and decide whether it belongs to the vowel set.",
+      "2": "Loop through the string, normalize case if helpful, and keep a running count.",
+      "3": "A common pattern is: if ch.lower() in 'aeiou': count += 1"
+    },
+    "answer_key": {
+      "solution_code": "def count_vowels(text):\n    count = 0\n    for ch in text:\n        if ch.lower() in 'aeiou':\n            count += 1\n    return count\n",
+      "explanation": "The function iterates through each character, checks whether it is a vowel, and increments the counter when it matches."
+    }
+  },
+  {
+    "problem_id": "title_case_sentence",
+    "title": "Title Case Sentence",
+    "prompt": "Write a function named title_case_sentence(text) that returns a string where the first letter of each word is uppercase and the remaining letters are lowercase.",
+    "difficulty": "Medium",
+    "function_name": "title_case_sentence",
+    "starter_code": "def title_case_sentence(text):\n    # Write your code here\n    pass\n",
+    "test_cases": [
+      {
+        "input": ["hello world"],
+        "expected": "Hello World"
+      },
+      {
+        "input": ["pYtHoN is FUN"],
+        "expected": "Python Is Fun"
+      },
+      {
+        "input": ["single"],
+        "expected": "Single"
+      }
+    ],
+    "hints": {
+      "1": "Think about how to transform each word independently before joining the words back together.",
+      "2": "Split the sentence into words, normalize each one, then rebuild the sentence with spaces.",
+      "3": "One approach is: words = text.split(); transform each word with word[:1].upper() + word[1:].lower()"
+    },
+    "answer_key": {
+      "solution_code": "def title_case_sentence(text):\n    words = text.split()\n    formatted = []\n    for word in words:\n        formatted.append(word[:1].upper() + word[1:].lower())\n    return ' '.join(formatted)\n",
+      "explanation": "The function formats each word separately, then joins them back into a single sentence."
+    }
+  },
+  {
+    "problem_id": "merge_sorted_lists",
+    "title": "Merge Sorted Lists",
+    "prompt": "Write a function named merge_sorted_lists(left, right) that merges two sorted integer lists into one sorted list.",
+    "difficulty": "Hard",
+    "function_name": "merge_sorted_lists",
+    "starter_code": "def merge_sorted_lists(left, right):\n    # Write your code here\n    pass\n",
+    "test_cases": [
+      {
+        "input": [[1, 4, 7], [2, 3, 9]],
+        "expected": [1, 2, 3, 4, 7, 9]
+      },
+      {
+        "input": [[], [1, 2]],
+        "expected": [1, 2]
+      },
+      {
+        "input": [[0, 5], [-1, 6, 10]],
+        "expected": [-1, 0, 5, 6, 10]
+      }
+    ],
+    "hints": {
+      "1": "Since both inputs are already sorted, you can build the answer by comparing the current front elements.",
+      "2": "Use two index pointers and append the smaller value each step, then append any leftover tail.",
+      "3": "Keep integers i and j, compare left[i] and right[j], then extend with the remaining slice once one list ends."
+    },
+    "answer_key": {
+      "solution_code": "def merge_sorted_lists(left, right):\n    merged = []\n    i = 0\n    j = 0\n    while i < len(left) and j < len(right):\n        if left[i] <= right[j]:\n            merged.append(left[i])\n            i += 1\n        else:\n            merged.append(right[j])\n            j += 1\n    merged.extend(left[i:])\n    merged.extend(right[j:])\n    return merged\n",
+      "explanation": "Two pointers let the function merge the lists in linear time by always taking the smaller next element."
+    }
+  },
+  {
+    "problem_id": "group_anagrams",
+    "title": "Group Anagrams",
+    "prompt": "Write a function named group_anagrams(words) that groups together words that are anagrams of each other. Return a list of grouped word lists. Preserve the original word order within each group.",
+    "difficulty": "Hard",
+    "function_name": "group_anagrams",
+    "starter_code": "def group_anagrams(words):\n    # Write your code here\n    pass\n",
+    "test_cases": [
+      {
+        "input": [["eat", "tea", "tan", "ate", "nat", "bat"]],
+        "expected": [["eat", "tea", "ate"], ["tan", "nat"], ["bat"]]
+      },
+      {
+        "input": [[""]],
+        "expected": [[""]]
+      },
+      {
+        "input": [["abc", "bca", "xyz", "zyx", "foo"]],
+        "expected": [["abc", "bca"], ["xyz", "zyx"], ["foo"]]
+      }
+    ],
+    "hints": {
+      "1": "Words that are anagrams share the same canonical representation after you reorder their letters.",
+      "2": "Use a dictionary keyed by a normalized version of each word, and append words to the matching group.",
+      "3": "A common key is ''.join(sorted(word)); build groups in insertion order and return the dictionary values."
+    },
+    "answer_key": {
+      "solution_code": "def group_anagrams(words):\n    groups = {}\n    for word in words:\n        key = ''.join(sorted(word))\n        if key not in groups:\n            groups[key] = []\n        groups[key].append(word)\n    return list(groups.values())\n",
+      "explanation": "Sorting the letters of a word produces the same key for all anagrams, so a dictionary can collect them into groups."
+    }
   }
 ]

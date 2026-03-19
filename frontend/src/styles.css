@@ -92,6 +92,28 @@ p {
   margin-top: 28px;
 }
 
+.auth-toggle {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  margin-top: 10px;
+}
+
+.toggle-button {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  padding: 10px 14px;
+}
+
+.toggle-button.active {
+  background: var(--accent);
+  color: #fff9f1;
+}
+
 .auth-form label {
   display: grid;
   gap: 8px;
@@ -141,8 +163,15 @@ button:disabled {
   border: 1px solid var(--line);
 }
 
+.danger-button {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid rgba(159, 45, 32, 0.24);
+}
+
 .secondary-button:hover,
-.ghost-button:hover {
+.ghost-button:hover,
+.danger-button:hover {
   background: rgba(255, 255, 255, 0.65);
 }
 
@@ -188,9 +217,41 @@ button:disabled {
   margin-bottom: 18px;
 }
 
+.panel-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .problem-items {
   display: grid;
   gap: 12px;
+}
+
+.difficulty-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 6px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid var(--line);
+}
+
+.difficulty-chip {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  border-radius: 14px;
+  text-align: center;
+  padding: 12px 10px;
+}
+
+.difficulty-chip.active {
+  background: var(--accent);
+  color: #fff9f1;
+  box-shadow: 0 8px 18px rgba(190, 79, 44, 0.2);
 }
 
 .problem-item {

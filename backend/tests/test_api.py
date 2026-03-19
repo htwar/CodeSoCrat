@@ -106,6 +106,37 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()["token"]
 
+    def test_register_creates_student_account(self) -> None:
+        response = self.client.post(
+            "/auth/register",
+            json={
+                "email": "new.student@example.com",
+                "password": "strongpass123",
+                "confirm_password": "strongpass123",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["role"], "Student")
+        self.assertTrue(payload["token"])
+
+        login = self.client.post(
+            "/auth/login",
+            json={"email": "new.student@example.com", "password": "strongpass123"},
+        )
+        self.assertEqual(login.status_code, 200)
+
+    def test_register_rejects_duplicate_email(self) -> None:
+        response = self.client.post(
+            "/auth/register",
+            json={
+                "email": "student@codesocrat.dev",
+                "password": "strongpass123",
+                "confirm_password": "strongpass123",
+            },
+        )
+        self.assertEqual(response.status_code, 409)
+
     def test_student_submission_unlocks_hint(self) -> None:
         token = self._login("student@codesocrat.dev", "studentpass")
         headers = {"Authorization": f"Bearer {token}"}
@@ -322,6 +353,30 @@ class BackendFlowTests(unittest.TestCase):
         response = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers"})
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["detail"], "No hints unlocked yet.")
+
+    def test_reset_progress_clears_problem_state(self) -> None:
+        token = self._login("student@codesocrat.dev", "studentpass")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        failed = self.client.post(
+            "/submissions",
+            headers=headers,
+            json={
+                "problem_id": "sum_two_numbers",
+                "code": "def add_numbers(a, b):\n    return a - b\n",
+                "timed_mode": False,
+            },
+        )
+        self.assertEqual(failed.status_code, 200)
+        self.assertEqual(failed.json()["hint_stage_unlocked"], 1)
+
+        reset = self.client.delete("/progress/sum_two_numbers", headers=headers)
+        self.assertEqual(reset.status_code, 200)
+        self.assertEqual(reset.json()["success"], True)
+
+        hints = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(hints.status_code, 403)
+        self.assertEqual(hints.json()["detail"], "No hints unlocked yet.")
 
 
 if __name__ == "__main__":

@@ -9,10 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import create_token, get_current_user, require_author, verify_password
+from app.auth import create_token, get_current_user, hash_password, require_author, verify_password
 from app.config import settings
 from app.database import Base, SessionLocal, engine, ensure_schema_evolution, get_db
-from app.models import GeneratedHint, Problem, Submission, TestCase, User
+from app.models import GeneratedHint, Problem, Submission, TestCase, User, UserProblemProgress
 from app.schemas import (
     HintResponse,
     LoginRequest,
@@ -21,6 +21,8 @@ from app.schemas import (
     ProblemSummary,
     ProblemUploadPayload,
     ProblemUploadResponse,
+    RegisterRequest,
+    ResetProgressResponse,
     SubmissionRequest,
     SubmissionResponse,
 )
@@ -80,6 +82,24 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
+    return LoginResponse(token=create_token(user), user_id=str(user.id), role=user.role)
+
+
+@app.post("/auth/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> LoginResponse:
+    enforce_login_identity_rate_limit(payload.email)
+    existing_user = db.query(User).filter(User.email == payload.email).first()
+    if existing_user is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with that email already exists.")
+
+    user = User(
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+        role="Student",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
     return LoginResponse(token=create_token(user), user_id=str(user.id), role=user.role)
 
 
@@ -240,3 +260,41 @@ def upload_problem(
     persist_problem(db=db, payload=payload, source="author", author_id=user.id)
     db.commit()
     return ProblemUploadResponse(success=True, problem_id=payload.problem_id)
+
+
+@app.delete("/progress/{problem_id}", response_model=ResetProgressResponse)
+def reset_problem_progress(
+    problem_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ResetProgressResponse:
+    problem = db.query(Problem).filter(Problem.problem_id == problem_id).first()
+    if problem is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
+
+    submission_ids = [
+        submission_id
+        for (submission_id,) in db.query(Submission.id)
+        .filter(Submission.user_id == user.id, Submission.problem_id == problem.id)
+        .all()
+    ]
+
+    if submission_ids:
+        db.query(GeneratedHint).filter(
+            GeneratedHint.user_id == user.id,
+            GeneratedHint.problem_id == problem.id,
+            GeneratedHint.submission_id.in_(submission_ids),
+        ).delete(synchronize_session=False)
+
+    db.query(Submission).filter(
+        Submission.user_id == user.id,
+        Submission.problem_id == problem.id,
+    ).delete(synchronize_session=False)
+
+    db.query(UserProblemProgress).filter(
+        UserProblemProgress.user_id == user.id,
+        UserProblemProgress.problem_id == problem.id,
+    ).delete(synchronize_session=False)
+
+    db.commit()
+    return ResetProgressResponse(success=True, problem_id=problem.problem_id)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getHints, getProblems, login, submitCode, uploadProblem } from "./api";
+import { getHints, getProblems, login, register, resetProgress, submitCode, uploadProblem } from "./api";
 
 const starterUploadTemplate = `{
   "problem_id": "multiply_two_numbers",
@@ -26,13 +26,20 @@ const starterUploadTemplate = `{
 const demoSolution = "def add_numbers(a, b):\n    return a + b\n";
 
 const SESSION_STORAGE_KEY = "codesocrat-session";
+const DIFFICULTIES = ["Easy", "Medium", "Hard"];
 
-function AuthPanel({ onLogin, loading, error }) {
+function AuthPanel({ onLogin, onRegister, loading, error }) {
+  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("student@codesocrat.dev");
   const [password, setPassword] = useState("studentpass");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   function handleSubmit(event) {
     event.preventDefault();
+    if (mode === "register") {
+      onRegister({ email, password, confirm_password: confirmPassword });
+      return;
+    }
     onLogin({ email, password });
   }
 
@@ -41,8 +48,24 @@ function AuthPanel({ onLogin, loading, error }) {
       <p className="eyebrow">CodeSoCrat</p>
       <h1>Practice Python with guided feedback</h1>
       <p className="lede">
-        Log in as a student to solve problems or as an author to upload new ones.
+        Log in to keep working, or create a new student account to start fresh.
       </p>
+      <div className="auth-toggle">
+        <button
+          type="button"
+          className={mode === "login" ? "toggle-button active" : "toggle-button"}
+          onClick={() => setMode("login")}
+        >
+          Sign in
+        </button>
+        <button
+          type="button"
+          className={mode === "register" ? "toggle-button active" : "toggle-button"}
+          onClick={() => setMode("register")}
+        >
+          Create account
+        </button>
+      </div>
       <form className="auth-form" onSubmit={handleSubmit}>
         <label>
           Email
@@ -56,8 +79,18 @@ function AuthPanel({ onLogin, loading, error }) {
             onChange={(event) => setPassword(event.target.value)}
           />
         </label>
+        {mode === "register" ? (
+          <label>
+            Confirm Password
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+            />
+          </label>
+        ) : null}
         <button type="submit" disabled={loading}>
-          {loading ? "Signing in..." : "Sign in"}
+          {loading ? (mode === "register" ? "Creating..." : "Signing in...") : (mode === "register" ? "Create account" : "Sign in")}
         </button>
       </form>
       {error ? <p className="error-text">{error}</p> : null}
@@ -69,7 +102,7 @@ function AuthPanel({ onLogin, loading, error }) {
   );
 }
 
-function ProblemList({ problems, selectedProblemId, onSelect }) {
+function ProblemList({ problems, selectedDifficulty, selectedProblemId, onDifficultyChange, onSelect }) {
   return (
     <aside className="panel problem-list">
       <div className="panel-header">
@@ -78,7 +111,23 @@ function ProblemList({ problems, selectedProblemId, onSelect }) {
           <h2>Choose a challenge</h2>
         </div>
       </div>
+      <div className="difficulty-picker" role="tablist" aria-label="Difficulty levels">
+        {DIFFICULTIES.map((difficulty) => (
+          <button
+            key={difficulty}
+            type="button"
+            className={selectedDifficulty === difficulty ? "difficulty-chip active" : "difficulty-chip"}
+            onClick={() => onDifficultyChange(difficulty)}
+            role="tab"
+            aria-selected={selectedDifficulty === difficulty}
+            tabIndex={selectedDifficulty === difficulty ? 0 : -1}
+          >
+            {difficulty}
+          </button>
+        ))}
+      </div>
       <div className="problem-items">
+        {problems.length === 0 ? <p className="meta-copy">No problems available in this difficulty yet.</p> : null}
         {problems.map((problem) => (
           <button
             key={problem.problem_id}
@@ -100,6 +149,7 @@ function SubmissionPanel({
   code,
   setCode,
   onSubmit,
+  onResetProgress,
   submissionState,
   hintState,
   onUnlockHint,
@@ -121,9 +171,14 @@ function SubmissionPanel({
             <p className="eyebrow">{problem.difficulty}</p>
             <h2>{problem.title}</h2>
           </div>
-          <button type="button" className="secondary-button" onClick={() => setCode(problem.starter_code || "")}>
-            Reset to Starter
-          </button>
+          <div className="panel-actions">
+            <button type="button" className="secondary-button" onClick={() => setCode(problem.starter_code || "")}>
+              Reset to Starter
+            </button>
+            <button type="button" className="danger-button" onClick={onResetProgress}>
+              Reset Progress
+            </button>
+          </div>
         </div>
         <p className="prompt-copy">{problem.prompt}</p>
         <p className="meta-copy">Required function: <code>{problem.function_name}</code></p>
@@ -278,6 +333,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [problems, setProblems] = useState([]);
+  const [selectedDifficulty, setSelectedDifficulty] = useState("Easy");
   const [selectedProblemId, setSelectedProblemId] = useState("");
   const [codeByProblem, setCodeByProblem] = useState({});
   const [submissionState, setSubmissionState] = useState({ loading: false, result: null, error: "" });
@@ -300,7 +356,7 @@ export default function App() {
 
     async function loadProblems() {
       try {
-        const response = await getProblems(session.token);
+        const response = await getProblems(session.token, selectedDifficulty);
         if (!isActive) {
           return;
         }
@@ -317,6 +373,8 @@ export default function App() {
             });
             return next;
           });
+        } else {
+          setSelectedProblemId("");
         }
       } catch (loadError) {
         if (isActive) {
@@ -329,7 +387,7 @@ export default function App() {
     return () => {
       isActive = false;
     };
-  }, [session]);
+  }, [session, selectedDifficulty]);
 
   const selectedProblem = problems.find((problem) => problem.problem_id === selectedProblemId) || null;
   const currentCode = selectedProblem ? codeByProblem[selectedProblem.problem_id] || "" : "";
@@ -361,6 +419,20 @@ export default function App() {
       setSession(response);
     } catch (loginError) {
       setAuthError(loginError.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleRegister(credentials) {
+    setAuthLoading(true);
+    setAuthError("");
+
+    try {
+      const response = await register(credentials);
+      setSession(response);
+    } catch (registerError) {
+      setAuthError(registerError.message);
     } finally {
       setAuthLoading(false);
     }
@@ -437,8 +509,48 @@ export default function App() {
     }
   }
 
+  async function handleResetProgress() {
+    if (!selectedProblem || !session?.token) {
+      return;
+    }
+
+    try {
+      await resetProgress(session.token, selectedProblem.problem_id);
+      setCodeByProblem((current) => ({
+        ...current,
+        [selectedProblem.problem_id]: selectedProblem.starter_code || "",
+      }));
+      setSubmissionState({ loading: false, result: null, error: "" });
+      setHintState({
+        loadingStage: null,
+        hints: {
+          problem_id: selectedProblem.problem_id,
+          unlocked_stage: 0,
+          unlocked_stages: [],
+          highlight_stage: null,
+          conceptual: null,
+          strategic: null,
+          syntactic: null,
+        },
+        error: "",
+      });
+    } catch (resetError) {
+      setHintState((current) => ({
+        loadingStage: null,
+        hints: current.hints,
+        error: resetError.message,
+      }));
+    }
+  }
+
   function handleSelectProblem(problemId) {
     setSelectedProblemId(problemId);
+    setSubmissionState({ loading: false, result: null, error: "" });
+    setHintState({ loadingStage: null, hints: null, error: "" });
+  }
+
+  function handleDifficultyChange(difficulty) {
+    setSelectedDifficulty(difficulty);
     setSubmissionState({ loading: false, result: null, error: "" });
     setHintState({ loadingStage: null, hints: null, error: "" });
   }
@@ -456,7 +568,7 @@ export default function App() {
   if (!session) {
     return (
       <main className="app-shell auth-shell">
-        <AuthPanel onLogin={handleLogin} loading={authLoading} error={authError} />
+        <AuthPanel onLogin={handleLogin} onRegister={handleRegister} loading={authLoading} error={authError} />
       </main>
     );
   }
@@ -477,12 +589,19 @@ export default function App() {
       </header>
 
       <section className="dashboard">
-        <ProblemList problems={problems} selectedProblemId={selectedProblemId} onSelect={handleSelectProblem} />
+        <ProblemList
+          problems={problems}
+          selectedDifficulty={selectedDifficulty}
+          selectedProblemId={selectedProblemId}
+          onDifficultyChange={handleDifficultyChange}
+          onSelect={handleSelectProblem}
+        />
         <SubmissionPanel
           problem={selectedProblem}
           code={currentCode}
           setCode={updateCode}
           onSubmit={handleSubmit}
+          onResetProgress={handleResetProgress}
           submissionState={submissionState}
           hintState={hintState}
           onUnlockHint={handleUnlockHint}
