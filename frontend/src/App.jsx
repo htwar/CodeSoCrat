@@ -1,3 +1,4 @@
+import Editor from "@monaco-editor/react";
 import { useEffect, useState } from "react";
 import { getHints, getProblems, login, register, resetProgress, submitCode, uploadProblem } from "./api";
 
@@ -154,6 +155,20 @@ function SubmissionPanel({
   hintState,
   onUnlockHint,
 }) {
+  const editorOptions = {
+    automaticLayout: true,
+    fontSize: 15,
+    glyphMargin: false,
+    lineNumbers: "on",
+    minimap: { enabled: false },
+    padding: { top: 16, bottom: 16 },
+    renderLineHighlight: "all",
+    roundedSelection: false,
+    scrollBeyondLastLine: false,
+    tabSize: 4,
+    wordWrap: "on",
+  };
+
   if (!problem) {
     return (
       <section className="panel workspace-panel empty-panel">
@@ -182,12 +197,17 @@ function SubmissionPanel({
         </div>
         <p className="prompt-copy">{problem.prompt}</p>
         <p className="meta-copy">Required function: <code>{problem.function_name}</code></p>
-        <textarea
-          className="editor"
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          spellCheck="false"
-        />
+        <div className="editor-frame">
+          <Editor
+            defaultLanguage="python"
+            language="python"
+            value={code}
+            onChange={(value) => setCode(value || "")}
+            options={editorOptions}
+            theme="vs"
+            height="420px"
+          />
+        </div>
         <div className="editor-actions">
           <button type="button" onClick={onSubmit} disabled={submissionState.loading}>
             {submissionState.loading ? "Running..." : "Run Submission"}
@@ -281,6 +301,18 @@ function AuthorPanel({ token }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const authorEditorOptions = {
+    automaticLayout: true,
+    fontSize: 14,
+    formatOnPaste: true,
+    lineNumbers: "on",
+    minimap: { enabled: false },
+    padding: { top: 16, bottom: 16 },
+    renderLineHighlight: "all",
+    scrollBeyondLastLine: false,
+    tabSize: 2,
+    wordWrap: "on",
+  };
 
   async function handleUpload() {
     setLoading(true);
@@ -309,7 +341,17 @@ function AuthorPanel({ token }) {
       <p className="prompt-copy">
         Paste a single JSON problem payload here and send it to the backend upload endpoint.
       </p>
-      <textarea className="editor author-editor" value={jsonText} onChange={(event) => setJsonText(event.target.value)} />
+      <div className="editor-frame author-editor-frame">
+        <Editor
+          defaultLanguage="json"
+          language="json"
+          value={jsonText}
+          onChange={(value) => setJsonText(value || "")}
+          options={authorEditorOptions}
+          theme="vs"
+          height="320px"
+        />
+      </div>
       <div className="editor-actions">
         <button type="button" onClick={handleUpload} disabled={loading}>
           {loading ? "Uploading..." : "Upload Problem"}
