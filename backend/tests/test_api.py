@@ -59,6 +59,15 @@ class BackendFlowTests(unittest.TestCase):
                         feedback="Runtime error occurred inside the Docker sandbox.",
                         valid_attempt=False,
                     )
+                if "return n - 2 == 0" in code:
+                    return EvaluationResult(
+                        result="Fail",
+                        failure_category="IncorrectOutput",
+                        runtime_ms=9,
+                        memory_mb=32,
+                        feedback="Test case 2 failed: expected True, got False.",
+                        valid_attempt=True,
+                    )
                 return EvaluationResult(
                     result="Pass",
                     failure_category=None,
@@ -121,7 +130,14 @@ class BackendFlowTests(unittest.TestCase):
 
         hints = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers"})
         self.assertEqual(hints.status_code, 200)
-        self.assertEqual(hints.json()["conceptual"], "generated-stage-1")
+        self.assertEqual(hints.json()["highlight_stage"], 1)
+        self.assertEqual(hints.json()["unlocked_stages"], [1])
+        self.assertIsNone(hints.json()["conceptual"])
+
+        unlocked = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers", "stage": 1})
+        self.assertEqual(unlocked.status_code, 200)
+        self.assertEqual(unlocked.json()["conceptual"], "generated-stage-1")
+        self.assertIsNone(unlocked.json()["strategic"])
 
     def test_syntax_failure_unlocks_only_syntactic_hint(self) -> None:
         token = self._login("student@codesocrat.dev", "studentpass")
@@ -144,9 +160,60 @@ class BackendFlowTests(unittest.TestCase):
 
         hints = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers"})
         self.assertEqual(hints.status_code, 200)
+        self.assertEqual(hints.json()["highlight_stage"], 3)
+        self.assertEqual(hints.json()["unlocked_stages"], [3])
         self.assertIsNone(hints.json()["conceptual"])
         self.assertIsNone(hints.json()["strategic"])
-        self.assertEqual(hints.json()["syntactic"], "generated-stage-3")
+        self.assertIsNone(hints.json()["syntactic"])
+
+        unlocked = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers", "stage": 3})
+        self.assertEqual(unlocked.status_code, 200)
+        self.assertEqual(unlocked.json()["syntactic"], "generated-stage-3")
+
+    def test_syntax_failure_prioritizes_syntactic_hint_even_when_all_stages_are_unlocked(self) -> None:
+        token = self._login("student@codesocrat.dev", "studentpass")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        for _ in range(3):
+            response = self.client.post(
+                "/submissions",
+                headers=headers,
+                json={
+                    "problem_id": "sum_two_numbers",
+                    "code": "def add_numbers(a, b):\n    return a - b\n",
+                    "timed_mode": False,
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+
+        syntax_response = self.client.post(
+            "/submissions",
+            headers=headers,
+            json={
+                "problem_id": "sum_two_numbers",
+                "code": "def add_numbers(a, b):\n    return a + \n",
+                "timed_mode": False,
+            },
+        )
+        self.assertEqual(syntax_response.status_code, 200)
+        self.assertEqual(syntax_response.json()["failure_category"], "SyntaxError")
+
+        hints = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(hints.status_code, 200)
+        self.assertEqual(hints.json()["highlight_stage"], 3)
+
+    def test_evaluation_captures_syntax_error_context(self) -> None:
+        from app.services.evaluation import EvaluationService
+
+        service = EvaluationService(executor=None)
+        result = service.evaluate(
+            code="def add_numbers(a, b):\n    return a + \n",
+            function_name="add_numbers",
+            test_cases=[([1, 2], 3)],
+        )
+        self.assertEqual(result.failure_category, "SyntaxError")
+        self.assertEqual(result.error_line, 2)
+        self.assertEqual(result.error_excerpt, "    return a +")
 
     def test_student_submission_passes(self) -> None:
         token = self._login("student@codesocrat.dev", "studentpass")
@@ -165,6 +232,24 @@ class BackendFlowTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["result"], "Pass")
         self.assertIsNone(payload["failure_category"])
+
+    def test_is_even_problem_rejects_weak_false_positive_solution(self) -> None:
+        token = self._login("student@codesocrat.dev", "studentpass")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = self.client.post(
+            "/submissions",
+            headers=headers,
+            json={
+                "problem_id": "is_even_number",
+                "code": "def is_even(n):\n    return n - 2 == 0\n",
+                "timed_mode": False,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["result"], "Fail")
+        self.assertEqual(payload["failure_category"], "IncorrectOutput")
 
     def test_author_uploads_problem(self) -> None:
         token = self._login("author@codesocrat.dev", "authorpass")
@@ -229,6 +314,14 @@ class BackendFlowTests(unittest.TestCase):
         limited = self.client.post("/auth/login", json={"email": "student@codesocrat.dev", "password": "wrongpass"})
         self.assertEqual(limited.status_code, 429)
         self.assertIn("Retry-After", limited.headers)
+
+    def test_brand_new_problem_has_no_hint_access_before_any_submission(self) -> None:
+        token = self._login("student@codesocrat.dev", "studentpass")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"], "No hints unlocked yet.")
 
 
 if __name__ == "__main__":

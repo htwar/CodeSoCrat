@@ -39,8 +39,24 @@
         "expected": true
       },
       {
+        "input": [4],
+        "expected": true
+      },
+      {
+        "input": [0],
+        "expected": true
+      },
+      {
         "input": [5],
         "expected": false
+      },
+      {
+        "input": [3],
+        "expected": false
+      },
+      {
+        "input": [-2],
+        "expected": true
       }
     ],
     "hints": {

@@ -49,6 +49,8 @@ class Settings(BaseModel):
     ollama_base_url: str = os.getenv("CODESOCRAT_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     ollama_model: str = os.getenv("CODESOCRAT_OLLAMA_MODEL", "qwen2.5-coder:14b")
     ollama_timeout_seconds: int = int(os.getenv("CODESOCRAT_OLLAMA_TIMEOUT_SECONDS", "30"))
+    ollama_keep_alive: str = os.getenv("CODESOCRAT_OLLAMA_KEEP_ALIVE", "10m")
+    ollama_hint_max_tokens: int = int(os.getenv("CODESOCRAT_OLLAMA_HINT_MAX_TOKENS", "120"))
     rate_limit_window_seconds: int = int(os.getenv("CODESOCRAT_RATE_LIMIT_WINDOW_SECONDS", "60"))
     rate_limit_ip_public: int = int(os.getenv("CODESOCRAT_RATE_LIMIT_IP_PUBLIC", "60"))
     rate_limit_ip_authenticated: int = int(os.getenv("CODESOCRAT_RATE_LIMIT_IP_AUTHENTICATED", "120"))

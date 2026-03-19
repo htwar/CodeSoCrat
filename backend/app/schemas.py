@@ -87,6 +87,8 @@ class SubmissionResponse(StrictModel):
 class HintResponse(StrictModel):
     problem_id: str
     unlocked_stage: int
+    unlocked_stages: list[int]
+    highlight_stage: Optional[int] = None
     conceptual: Optional[str]
     strategic: Optional[str]
     syntactic: Optional[str]

@@ -270,6 +270,12 @@ button:disabled {
   border-color: rgba(190, 79, 44, 0.28);
 }
 
+.hint-card.highlighted {
+  border-color: rgba(190, 79, 44, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(190, 79, 44, 0.2);
+  background: linear-gradient(135deg, rgba(190, 79, 44, 0.08), rgba(255, 250, 241, 0.95));
+}
+
 .error-text {
   color: var(--danger);
   margin-top: 14px;

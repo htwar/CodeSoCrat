@@ -27,6 +27,8 @@ class EvaluationResult:
     memory_mb: int
     feedback: str
     valid_attempt: bool
+    error_line: Optional[int] = None
+    error_excerpt: Optional[str] = None
 
 
 class DockerSandboxExecutor:
@@ -283,6 +285,8 @@ class EvaluationService:
                 memory_mb=0,
                 feedback=syntax_error,
                 valid_attempt=False,
+                error_line=self._extract_error_line_number(syntax_error),
+                error_excerpt=self._extract_error_excerpt(code, self._extract_error_line_number(syntax_error)),
             )
 
         definition_error = self._check_required_function(code, function_name)
@@ -311,3 +315,21 @@ class EvaluationService:
         if function_name not in functions:
             return f"Required function '{function_name}' is missing or misnamed."
         return None
+
+    def _extract_error_line_number(self, feedback: str) -> Optional[int]:
+        prefix = "Syntax error on line "
+        if not feedback.startswith(prefix):
+            return None
+        try:
+            line_str = feedback[len(prefix):].split(":", 1)[0]
+            return int(line_str)
+        except (ValueError, IndexError):
+            return None
+
+    def _extract_error_excerpt(self, code: str, line_number: Optional[int]) -> Optional[str]:
+        if line_number is None:
+            return None
+        lines = code.splitlines()
+        if line_number < 1 or line_number > len(lines):
+            return None
+        return lines[line_number - 1].rstrip()

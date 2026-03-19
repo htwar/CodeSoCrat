@@ -89,6 +89,8 @@ class Submission(Base):
     timed_mode: Mapped[bool] = mapped_column(Boolean, default=False)
     result: Mapped[str] = mapped_column(String(16))
     failure_category: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    error_line: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_excerpt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     runtime_ms: Mapped[int] = mapped_column(Integer, default=0)
     memory_mb: Mapped[int] = mapped_column(Integer, default=0)
     feedback: Mapped[str] = mapped_column(Text)
@@ -114,3 +116,16 @@ class UserProblemProgress(Base):
 
     user: Mapped[User] = relationship(back_populates="progress_records")
     problem: Mapped[Problem] = relationship(back_populates="progress_records")
+
+
+class GeneratedHint(Base):
+    __tablename__ = "generated_hints"
+    __table_args__ = (UniqueConstraint("user_id", "problem_id", "submission_id", "stage", name="uq_generated_hint_cache"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    problem_id: Mapped[int] = mapped_column(ForeignKey("problems.id"), index=True)
+    submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id"), index=True)
+    stage: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

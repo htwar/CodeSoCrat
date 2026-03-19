@@ -57,9 +57,10 @@ export async function submitCode(token, payload) {
   });
 }
 
-export async function getHints(token, problemId) {
+export async function getHints(token, problemId, stage) {
   const encodedProblemId = encodeURIComponent(problemId);
-  return request(`/hints?problem_id=${encodedProblemId}`, {
+  const stageQuery = stage ? `&stage=${encodeURIComponent(stage)}` : "";
+  return request(`/hints?problem_id=${encodedProblemId}${stageQuery}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },

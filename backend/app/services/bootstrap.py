@@ -25,13 +25,45 @@ def seed_default_users(db: Session) -> None:
 
 
 def seed_starter_problems(db: Session) -> None:
-    if db.query(Problem).filter(Problem.source == "starter").first():
-        return
-
     starter_items = json.loads(settings.starter_problems_path.read_text())
     for item in starter_items:
         payload = ProblemUploadPayload.model_validate(item)
-        persist_problem(db=db, payload=payload, source="starter", author_id=None)
+        existing_problem = db.query(Problem).filter(Problem.problem_id == payload.problem_id, Problem.source == "starter").first()
+        if existing_problem is None:
+            persist_problem(db=db, payload=payload, source="starter", author_id=None)
+            continue
+
+        existing_problem.title = payload.title
+        existing_problem.prompt = payload.prompt
+        existing_problem.difficulty = payload.difficulty
+        existing_problem.function_name = payload.function_name
+        existing_problem.starter_code = payload.starter_code
+
+        db.query(TestCase).filter(TestCase.problem_id == existing_problem.id).delete()
+        db.query(Hint).filter(Hint.problem_id == existing_problem.id).delete()
+        db.query(AnswerKey).filter(AnswerKey.problem_id == existing_problem.id).delete()
+
+        for test_case in payload.test_cases:
+            db.add(
+                TestCase(
+                    problem_id=existing_problem.id,
+                    input_json=json.dumps(test_case.input),
+                    expected_json=json.dumps(test_case.expected),
+                )
+            )
+
+        if payload.hints:
+            for stage_str, content in payload.hints.items():
+                db.add(Hint(problem_id=existing_problem.id, stage=int(stage_str), content=content))
+
+        if payload.answer_key:
+            db.add(
+                AnswerKey(
+                    problem_id=existing_problem.id,
+                    solution_code=payload.answer_key.solution_code,
+                    explanation=payload.answer_key.explanation,
+                )
+            )
     db.commit()
 
 

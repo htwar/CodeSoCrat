@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.auth import create_token, get_current_user, require_author, verify_password
 from app.config import settings
-from app.database import Base, SessionLocal, engine, get_db
-from app.models import Problem, Submission, TestCase, User
+from app.database import Base, SessionLocal, engine, ensure_schema_evolution, get_db
+from app.models import GeneratedHint, Problem, Submission, TestCase, User
 from app.schemas import (
     HintResponse,
     LoginRequest,
@@ -26,7 +26,7 @@ from app.schemas import (
 )
 from app.services.bootstrap import persist_problem, seed_default_users, seed_starter_problems
 from app.services.evaluation import EvaluationService
-from app.services.hints import HintContext, OllamaHintService
+from app.services.hints import HintContext, OllamaHintService, cache_generated_hint
 from app.services.progress import ProgressService
 from app.rate_limit import enforce_login_identity_rate_limit, enforce_rate_limit
 
@@ -38,6 +38,7 @@ hint_service = OllamaHintService()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_schema_evolution()
     db = SessionLocal()
     try:
         seed_default_users(db)
@@ -132,6 +133,8 @@ def submit_code(
         timed_mode=payload.timed_mode,
         result=evaluation.result,
         failure_category=evaluation.failure_category,
+        error_line=evaluation.error_line,
+        error_excerpt=evaluation.error_excerpt,
         runtime_ms=evaluation.runtime_ms,
         memory_mb=evaluation.memory_mb,
         feedback=evaluation.feedback,
@@ -157,6 +160,7 @@ def submit_code(
 @app.get("/hints", response_model=HintResponse)
 def get_hints(
     problem_id: str = Query(..., min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$"),
+    stage: Optional[int] = Query(default=None, ge=1, le=3),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HintResponse:
@@ -168,6 +172,8 @@ def get_hints(
     unlocked_stages = progress_service.get_unlocked_stages(progress)
     if not unlocked_stages:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No hints unlocked yet.")
+    if stage is not None and stage not in unlocked_stages:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="That hint stage is not unlocked yet.")
 
     latest_submission = (
         db.query(Submission)
@@ -182,10 +188,29 @@ def get_hints(
         latest_submission=latest_submission,
     )
 
-    generated_hints: dict[int, str] = {}
+    cached_hints = (
+        db.query(GeneratedHint)
+        .filter(GeneratedHint.user_id == user.id, GeneratedHint.problem_id == problem.id)
+        .all()
+    )
+    generated_hints = hint_service.get_cached_hints(
+        cached_hints=cached_hints,
+        unlocked_stages=unlocked_stages,
+        latest_submission=latest_submission,
+    )
+
     try:
-        for stage in sorted(unlocked_stages):
+        if stage is not None and latest_submission is not None and stage not in generated_hints:
             generated_hints[stage] = hint_service.generate_hint(stage=stage, context=context)
+            cache_generated_hint(
+                db=db,
+                user=user,
+                problem=problem,
+                submission=latest_submission,
+                stage=stage,
+                content=generated_hints[stage],
+            )
+            db.commit()
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
@@ -193,6 +218,11 @@ def get_hints(
         unlocked_stages=unlocked_stages,
         generated_hints=generated_hints,
         problem=problem,
+    )
+    payload["highlight_stage"] = hint_service.determine_highlight_stage(
+        unlocked_stages=unlocked_stages,
+        available_hints=generated_hints,
+        context=context,
     )
     return HintResponse.model_validate(payload)
 

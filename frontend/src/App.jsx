@@ -102,7 +102,7 @@ function SubmissionPanel({
   onSubmit,
   submissionState,
   hintState,
-  onLoadHints,
+  onUnlockHint,
 }) {
   if (!problem) {
     return (
@@ -162,24 +162,61 @@ function SubmissionPanel({
             <p className="eyebrow">Feedback</p>
             <h2>Hints</h2>
           </div>
-          <button type="button" className="secondary-button" onClick={onLoadHints} disabled={hintState.loading}>
-            {hintState.loading ? "Loading..." : "Load Hints"}
-          </button>
         </div>
         {hintState.error ? <p className="error-text">{hintState.error}</p> : null}
-        <HintCard title="Conceptual" content={hintState.hints?.conceptual} />
-        <HintCard title="Strategic" content={hintState.hints?.strategic} />
-        <HintCard title="Syntactic" content={hintState.hints?.syntactic} />
+        <HintCard
+          title="Conceptual"
+          stage={1}
+          hintState={hintState}
+          onUnlockHint={onUnlockHint}
+        />
+        <HintCard
+          title="Strategic"
+          stage={2}
+          hintState={hintState}
+          onUnlockHint={onUnlockHint}
+        />
+        <HintCard
+          title="Syntactic"
+          stage={3}
+          hintState={hintState}
+          onUnlockHint={onUnlockHint}
+        />
       </div>
     </section>
   );
 }
 
-function HintCard({ title, content }) {
+function HintCard({ title, stage, hintState, onUnlockHint }) {
+  const hints = hintState.hints || {};
+  const stageKey = stage === 1 ? "conceptual" : stage === 2 ? "strategic" : "syntactic";
+  const content = hints[stageKey];
+  const unlockedStages = hints.unlocked_stages || [];
+  const isUnlocked = unlockedStages.includes(stage);
+  const isHighlighted = isUnlocked && hints.highlight_stage === stage;
+  const isLoading = hintState.loadingStage === stage;
+
   return (
-    <article className={content ? "hint-card unlocked" : "hint-card locked"}>
+    <article
+      className={[
+        "hint-card",
+        content ? "unlocked" : "locked",
+        isHighlighted ? "highlighted" : "",
+      ].join(" ").trim()}
+    >
       <h3>{title}</h3>
-      <p>{content || "Locked until you earn this hint stage."}</p>
+      <p>
+        {content
+          ? content
+          : isUnlocked
+            ? "This hint is unlocked and ready. Reveal it when you want more guidance."
+            : "Locked until you earn this hint stage."}
+      </p>
+      {isUnlocked && !content ? (
+        <button type="button" className="secondary-button" onClick={() => onUnlockHint(stage)} disabled={isLoading}>
+          {isLoading ? "Unlocking..." : "Unlock Hint"}
+        </button>
+      ) : null}
     </article>
   );
 }
@@ -244,7 +281,7 @@ export default function App() {
   const [selectedProblemId, setSelectedProblemId] = useState("");
   const [codeByProblem, setCodeByProblem] = useState({});
   const [submissionState, setSubmissionState] = useState({ loading: false, result: null, error: "" });
-  const [hintState, setHintState] = useState({ loading: false, hints: null, error: "" });
+  const [hintState, setHintState] = useState({ loadingStage: null, hints: null, error: "" });
 
   useEffect(() => {
     if (session) {
@@ -297,6 +334,14 @@ export default function App() {
   const selectedProblem = problems.find((problem) => problem.problem_id === selectedProblemId) || null;
   const currentCode = selectedProblem ? codeByProblem[selectedProblem.problem_id] || "" : "";
 
+  useEffect(() => {
+    if (!selectedProblem || !session?.token) {
+      return;
+    }
+
+    refreshHintState(selectedProblem.problem_id, session.token);
+  }, [selectedProblemId, session?.token]);
+
   function updateCode(nextCode) {
     if (!selectedProblem) {
       return;
@@ -321,12 +366,38 @@ export default function App() {
     }
   }
 
+  async function refreshHintState(problemId, token) {
+    try {
+      const response = await getHints(token, problemId);
+      setHintState({ loadingStage: null, hints: response, error: "" });
+    } catch (hintError) {
+      if (String(hintError.message).includes("No hints unlocked yet")) {
+        setHintState({
+          loadingStage: null,
+          hints: {
+            problem_id: problemId,
+            unlocked_stage: 0,
+            unlocked_stages: [],
+            highlight_stage: null,
+            conceptual: null,
+            strategic: null,
+            syntactic: null,
+          },
+          error: "",
+        });
+        return;
+      }
+      setHintState({ loadingStage: null, hints: null, error: hintError.message });
+    }
+  }
+
   async function handleSubmit() {
     if (!selectedProblem || !session?.token) {
       return;
     }
 
     setSubmissionState({ loading: true, result: null, error: "" });
+    setHintState({ loadingStage: null, hints: null, error: "" });
 
     try {
       const response = await submitCode(session.token, {
@@ -335,30 +406,41 @@ export default function App() {
         timed_mode: false,
       });
       setSubmissionState({ loading: false, result: response, error: "" });
+      if (response.hint_stage_unlocked > 0) {
+        await refreshHintState(selectedProblem.problem_id, session.token);
+      }
     } catch (submitError) {
       setSubmissionState({ loading: false, result: null, error: submitError.message });
     }
   }
 
-  async function handleLoadHints() {
+  async function handleUnlockHint(stage) {
     if (!selectedProblem || !session?.token) {
       return;
     }
 
-    setHintState({ loading: true, hints: null, error: "" });
+    setHintState((current) => ({
+      loadingStage: stage,
+      hints: current.hints,
+      error: "",
+    }));
 
     try {
-      const response = await getHints(session.token, selectedProblem.problem_id);
-      setHintState({ loading: false, hints: response, error: "" });
+      const response = await getHints(session.token, selectedProblem.problem_id, stage);
+      setHintState({ loadingStage: null, hints: response, error: "" });
     } catch (hintError) {
-      setHintState({ loading: false, hints: null, error: hintError.message });
+      setHintState((current) => ({
+        loadingStage: null,
+        hints: current.hints,
+        error: hintError.message,
+      }));
     }
   }
 
   function handleSelectProblem(problemId) {
     setSelectedProblemId(problemId);
     setSubmissionState({ loading: false, result: null, error: "" });
-    setHintState({ loading: false, hints: null, error: "" });
+    setHintState({ loadingStage: null, hints: null, error: "" });
   }
 
   function handleLogout() {
@@ -367,7 +449,7 @@ export default function App() {
     setSelectedProblemId("");
     setCodeByProblem({});
     setSubmissionState({ loading: false, result: null, error: "" });
-    setHintState({ loading: false, hints: null, error: "" });
+    setHintState({ loadingStage: null, hints: null, error: "" });
     setAuthError("");
   }
 
@@ -403,7 +485,7 @@ export default function App() {
           onSubmit={handleSubmit}
           submissionState={submissionState}
           hintState={hintState}
-          onLoadHints={handleLoadHints}
+          onUnlockHint={handleUnlockHint}
         />
       </section>
 
