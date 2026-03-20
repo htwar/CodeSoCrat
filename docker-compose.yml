@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-codesocrat}
+      POSTGRES_USER: ${POSTGRES_USER:-codesocrat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-codesocrat} -d ${POSTGRES_DB:-codesocrat}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      CODESOCRAT_DATABASE_URL: ${CODESOCRAT_DATABASE_URL:-postgresql+psycopg://codesocrat:change-me@db:5432/codesocrat}
+      CODESOCRAT_CORS_ORIGINS: ${CODESOCRAT_CORS_ORIGINS:-https://app.example.com}
+      CODESOCRAT_SESSION_COOKIE_SECURE: "true"
+      CODESOCRAT_SESSION_COOKIE_SAMESITE: "lax"
+    depends_on:
+      db:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    restart: unless-stopped
+
+  reverse-proxy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    environment:
+      CODESOCRAT_DOMAIN: ${CODESOCRAT_DOMAIN:-app.example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
