@@ -88,7 +88,7 @@ class OllamaHintService:
 
     def _build_prompt(self, *, stage: int, context: HintContext) -> str:
         submission = context.latest_submission
-        submission_code = submission.code if submission is not None else "No submission available."
+        submission_code = self._build_submission_excerpt(submission.code if submission is not None else "")
         failure_category = submission.failure_category if submission is not None else context.progress.last_failure_category
         execution_feedback = submission.feedback if submission is not None else "No execution feedback available."
         error_line = submission.error_line if submission is not None else None
@@ -106,31 +106,59 @@ class OllamaHintService:
             ),
         }
 
+        evidence_lines = [
+            f"Failure category: {failure_category or 'Unknown'}",
+        ]
+        if error_line is not None:
+            evidence_lines.append(f"Reported error line: {error_line}")
+        if error_excerpt:
+            evidence_lines.append(f"Reported error excerpt: {error_excerpt}")
+        if execution_feedback:
+            evidence_lines.append(f"Execution feedback: {execution_feedback}")
+
+        problem_context = [
+            f"Problem: {context.problem.title}",
+            f"Required function: {context.problem.function_name}",
+        ]
+        if stage in {1, 2}:
+            problem_context.append(f"Prompt: {self._condense_text(context.problem.prompt, limit=420)}")
+        else:
+            problem_context.append(f"Prompt summary: {self._condense_text(context.problem.prompt, limit=180)}")
+
         return "\n".join(
             [
-                "You are helping a student solve a Python programming problem.",
-                f"Hint stage: {STAGE_LABELS[stage]}",
+                "You are helping a student solve one Python problem.",
+                f"Hint type: {STAGE_LABELS[stage]}",
                 stage_instructions[stage],
-                "Keep the hint concise, specific, and educational.",
-                "Answer in 2-4 sentences or short bullets.",
-                "Do not mention test answers directly unless necessary to explain a syntax or definition issue.",
-                "Do not invent missing parentheses, indentation errors, or definition mistakes that are not present in the error evidence.",
-                "If the error evidence points to a specific line, anchor the hint to that line only.",
+                "Write at most 2 short bullets.",
+                "Be concrete, concise, and educational.",
+                "Do not reveal the full solution.",
+                "Do not mention any bug not supported by the evidence.",
                 "",
-                f"Problem title: {context.problem.title}",
-                f"Problem prompt: {context.problem.prompt}",
-                f"Required function name: {context.problem.function_name}",
-                f"Difficulty: {context.problem.difficulty}",
-                f"Failure category: {failure_category or 'Unknown'}",
-                f"Execution feedback: {execution_feedback}",
-                f"Reported error line: {error_line if error_line is not None else 'Unknown'}",
-                f"Reported error excerpt: {error_excerpt or 'Unknown'}",
-                f"Valid failed attempts so far: {context.progress.valid_failed_attempts}",
+                *problem_context,
+                *evidence_lines,
                 "",
-                "Student submission:",
+                "Student code excerpt:",
                 submission_code,
             ]
         )
+
+    def _build_submission_excerpt(self, code: str) -> str:
+        if not code:
+            return "No submission available."
+        lines = code.splitlines()
+        limit = settings.ollama_hint_code_preview_lines
+        if len(lines) <= limit:
+            return code
+        head = lines[: max(6, limit - 4)]
+        tail = lines[-2:]
+        return "\n".join([*head, "...", *tail])
+
+    def _condense_text(self, text: str, *, limit: int) -> str:
+        collapsed = " ".join(text.split())
+        if len(collapsed) <= limit:
+            return collapsed
+        return f"{collapsed[: limit - 3].rstrip()}..."
 
     def determine_highlight_stage(
         self,
