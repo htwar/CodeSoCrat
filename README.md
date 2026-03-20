@@ -21,6 +21,7 @@ This repository now contains a starter backend and a basic React frontend for th
 - Student login flow
 - Problem browser
 - Code editor and submission workspace
+- Visible sample cases in the problem view while grading cases remain hidden
 - Result and hint display
 - Author-only JSON upload panel
 

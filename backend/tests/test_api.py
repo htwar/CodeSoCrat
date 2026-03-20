@@ -202,6 +202,9 @@ class BackendFlowTests(unittest.TestCase):
         problems = self.client.get("/problems")
         self.assertEqual(problems.status_code, 200)
         self.assertTrue(problems.json()["problems"])
+        first_problem = problems.json()["problems"][0]
+        self.assertIn("example_cases", first_problem)
+        self.assertNotIn("test_cases", first_problem)
 
         response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
         self.assertEqual(response.status_code, 200)

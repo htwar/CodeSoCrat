@@ -72,6 +72,7 @@ class ProblemSummary(StrictModel):
     difficulty: str
     function_name: str
     starter_code: Optional[str]
+    example_cases: list["ProblemTestCasePayload"] = Field(default_factory=list)
     source: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -168,6 +169,7 @@ class ProblemUploadPayload(StrictModel):
     difficulty: str
     function_name: str
     starter_code: Optional[str] = Field(default=None, max_length=10000)
+    example_cases: list[ProblemTestCasePayload] = Field(default_factory=list)
     test_cases: list[ProblemTestCasePayload] = Field(min_length=1)
     hints: Optional[dict[str, str]] = None
     answer_key: Optional[AnswerKeyPayload] = None
@@ -231,10 +233,16 @@ class ProblemUploadPayload(StrictModel):
             raise ValueError("answer_key.solution_code must contain the required function name.")
 
         seen_cases = set()
+        for example_case in self.example_cases:
+            case_key = (json.dumps(example_case.input, sort_keys=True), json.dumps(example_case.expected, sort_keys=True))
+            if case_key in seen_cases:
+                raise ValueError("example_cases must not contain duplicates.")
+            seen_cases.add(case_key)
+
         for test_case in self.test_cases:
             case_key = (json.dumps(test_case.input, sort_keys=True), json.dumps(test_case.expected, sort_keys=True))
             if case_key in seen_cases:
-                raise ValueError("test_cases must not contain duplicates.")
+                raise ValueError("test_cases and example_cases must not contain duplicates.")
             seen_cases.add(case_key)
 
         return self
@@ -255,3 +263,6 @@ class AnswerKeyResponse(StrictModel):
     unlocked: bool
     solution_code: Optional[str] = None
     explanation: Optional[str] = None
+
+
+ProblemSummary.model_rebuild()

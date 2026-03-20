@@ -281,6 +281,24 @@ button:disabled {
   color: var(--muted);
 }
 
+.examples-panel {
+  margin-top: 16px;
+}
+
+.example-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+
+.example-card {
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.6);
+  padding: 12px 14px;
+}
+
 .editor {
   min-height: 360px;
   margin-top: 14px;

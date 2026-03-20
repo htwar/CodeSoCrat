@@ -9,8 +9,10 @@ const starterUploadTemplate = `{
   "difficulty": "Easy",
   "function_name": "multiply_numbers",
   "starter_code": "def multiply_numbers(a, b):\\n    pass\\n",
+  "example_cases": [
+    { "input": [2, 3], "expected": 6 }
+  ],
   "test_cases": [
-    { "input": [2, 3], "expected": 6 },
     { "input": [-1, 4], "expected": -4 }
   ],
   "hints": {
@@ -205,6 +207,25 @@ function SubmissionPanel({
         </div>
         <p className="prompt-copy">{problem.prompt}</p>
         <p className="meta-copy">Required function: <code>{problem.function_name}</code></p>
+        {problem.example_cases?.length ? (
+          <div className="examples-panel">
+            <p className="meta-copy"><strong>Sample Cases</strong></p>
+            <div className="example-list">
+              {problem.example_cases.map((exampleCase, index) => (
+                <div key={`${problem.problem_id}-example-${index}`} className="example-card">
+                  <p className="meta-copy">Example {index + 1}</p>
+                  <p className="meta-copy">
+                    Input: <code>{JSON.stringify(exampleCase.input)}</code>
+                  </p>
+                  <p className="meta-copy">
+                    Expected: <code>{JSON.stringify(exampleCase.expected)}</code>
+                  </p>
+                </div>
+              ))}
+            </div>
+            <p className="meta-copy">Additional grading cases are hidden and used only during evaluation.</p>
+          </div>
+        ) : null}
         <div className="editor-frame">
           <Editor
             defaultLanguage="python"

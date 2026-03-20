@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import hash_password
 from app.config import settings
-from app.models import AnswerKey, Hint, Problem, TestCase, User
+from app.models import AnswerKey, ExampleCase, Hint, Problem, TestCase, User
 from app.schemas import ProblemUploadPayload
 
 
@@ -39,9 +39,19 @@ def seed_starter_problems(db: Session) -> None:
         existing_problem.function_name = payload.function_name
         existing_problem.starter_code = payload.starter_code
 
+        db.query(ExampleCase).filter(ExampleCase.problem_id == existing_problem.id).delete()
         db.query(TestCase).filter(TestCase.problem_id == existing_problem.id).delete()
         db.query(Hint).filter(Hint.problem_id == existing_problem.id).delete()
         db.query(AnswerKey).filter(AnswerKey.problem_id == existing_problem.id).delete()
+
+        for example_case in payload.example_cases:
+            db.add(
+                ExampleCase(
+                    problem_id=existing_problem.id,
+                    input_json=json.dumps(example_case.input),
+                    expected_json=json.dumps(example_case.expected),
+                )
+            )
 
         for test_case in payload.test_cases:
             db.add(
@@ -80,6 +90,15 @@ def persist_problem(db: Session, payload: ProblemUploadPayload, source: str, aut
     )
     db.add(problem)
     db.flush()
+
+    for example_case in payload.example_cases:
+        db.add(
+            ExampleCase(
+                problem_id=problem.id,
+                input_json=json.dumps(example_case.input),
+                expected_json=json.dumps(example_case.expected),
+            )
+        )
 
     for test_case in payload.test_cases:
         db.add(

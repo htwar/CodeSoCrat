@@ -165,11 +165,31 @@ def list_problems(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProblemListResponse:
-    query = db.query(Problem).order_by(Problem.difficulty, Problem.title)
+    query = db.query(Problem).options(selectinload(Problem.example_cases)).order_by(Problem.difficulty, Problem.title)
     if difficulty:
         query = query.filter(Problem.difficulty == difficulty)
     problems = query.all()
-    return ProblemListResponse(problems=[ProblemSummary.model_validate(problem) for problem in problems])
+    return ProblemListResponse(
+        problems=[
+            ProblemSummary(
+                problem_id=problem.problem_id,
+                title=problem.title,
+                prompt=problem.prompt,
+                difficulty=problem.difficulty,
+                function_name=problem.function_name,
+                starter_code=problem.starter_code,
+                example_cases=[
+                    {
+                        "input": json.loads(example_case.input_json),
+                        "expected": json.loads(example_case.expected_json),
+                    }
+                    for example_case in problem.example_cases
+                ],
+                source=problem.source,
+            )
+            for problem in problems
+        ]
+    )
 
 
 def _execute_code(

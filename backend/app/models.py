@@ -38,11 +38,23 @@ class Problem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     author: Mapped[Optional[User]] = relationship(back_populates="created_problems")
+    example_cases: Mapped[list["ExampleCase"]] = relationship(back_populates="problem", cascade="all, delete-orphan")
     test_cases: Mapped[list["TestCase"]] = relationship(back_populates="problem", cascade="all, delete-orphan")
     hints: Mapped[list["Hint"]] = relationship(back_populates="problem", cascade="all, delete-orphan")
     answer_key: Mapped[Optional["AnswerKey"]] = relationship(back_populates="problem", cascade="all, delete-orphan", uselist=False)
     submissions: Mapped[list["Submission"]] = relationship(back_populates="problem")
     progress_records: Mapped[list["UserProblemProgress"]] = relationship(back_populates="problem")
+
+
+class ExampleCase(Base):
+    __tablename__ = "example_cases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    problem_id: Mapped[int] = mapped_column(ForeignKey("problems.id"), index=True)
+    input_json: Mapped[str] = mapped_column(Text)
+    expected_json: Mapped[str] = mapped_column(Text)
+
+    problem: Mapped[Problem] = relationship(back_populates="example_cases")
 
 
 class TestCase(Base):
