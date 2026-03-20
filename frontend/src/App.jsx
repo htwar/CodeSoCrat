@@ -486,10 +486,14 @@ export default function App() {
         if (!isActive) {
           return;
         }
+        setAuthError("");
         setProblems(response.problems);
         if (response.problems.length > 0) {
           const firstProblem = response.problems[0];
-          setSelectedProblemId((current) => current || firstProblem.problem_id);
+          setSelectedProblemId((current) => {
+            const stillExists = response.problems.some((problem) => problem.problem_id === current);
+            return stillExists ? current : firstProblem.problem_id;
+          });
           setCodeByProblem((current) => {
             const next = { ...current };
             response.problems.forEach((problem) => {
