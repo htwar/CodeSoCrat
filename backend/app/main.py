@@ -4,7 +4,7 @@ import json
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
@@ -70,23 +70,46 @@ async def rate_limit_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=token,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite=settings.session_cookie_samesite,
+        max_age=settings.session_cookie_max_age_seconds,
+        path="/",
+    )
+
+
+def _clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=settings.session_cookie_name,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite=settings.session_cookie_samesite,
+        path="/",
+    )
+
+
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/auth/login", response_model=LoginResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
+def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> LoginResponse:
     enforce_login_identity_rate_limit(payload.email)
     user = db.query(User).filter(User.email == payload.email).first()
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
-    return LoginResponse(token=create_token(user), user_id=str(user.id), role=user.role)
+    _set_session_cookie(response, create_token(user))
+    return LoginResponse(user_id=str(user.id), email=user.email, role=user.role)
 
 
 @app.post("/auth/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> LoginResponse:
+def register(payload: RegisterRequest, response: Response, db: Session = Depends(get_db)) -> LoginResponse:
     enforce_login_identity_rate_limit(payload.email)
     existing_user = db.query(User).filter(User.email == payload.email).first()
     if existing_user is not None:
@@ -100,7 +123,20 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> LoginRe
     db.add(user)
     db.commit()
     db.refresh(user)
-    return LoginResponse(token=create_token(user), user_id=str(user.id), role=user.role)
+    _set_session_cookie(response, create_token(user))
+    return LoginResponse(user_id=str(user.id), email=user.email, role=user.role)
+
+
+@app.get("/auth/session", response_model=LoginResponse)
+def get_session(user: User = Depends(get_current_user)) -> LoginResponse:
+    return LoginResponse(user_id=str(user.id), email=user.email, role=user.role)
+
+
+@app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+def logout() -> Response:
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_session_cookie(response)
+    return response
 
 
 @app.get("/problems", response_model=ProblemListResponse)

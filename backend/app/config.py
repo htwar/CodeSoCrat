@@ -39,6 +39,10 @@ class Settings(BaseModel):
         for origin in os.getenv("CODESOCRAT_CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",")
         if origin.strip()
     ]
+    session_cookie_name: str = os.getenv("CODESOCRAT_SESSION_COOKIE_NAME", "codesocrat_session")
+    session_cookie_secure: bool = os.getenv("CODESOCRAT_SESSION_COOKIE_SECURE", "false").lower() == "true"
+    session_cookie_samesite: str = os.getenv("CODESOCRAT_SESSION_COOKIE_SAMESITE", "lax")
+    session_cookie_max_age_seconds: int = int(os.getenv("CODESOCRAT_SESSION_COOKIE_MAX_AGE_SECONDS", str(7 * 24 * 60 * 60)))
     starter_problems_path: Path = Path(__file__).resolve().parents[2] / "data" / "starter_problems.json"
     evaluation_timeout_seconds: int = 2
     evaluation_memory_bytes: int = 128 * 1024 * 1024

@@ -29,6 +29,7 @@ async function request(path, options = {}) {
   const { headers: customHeaders = {}, ...restOptions } = options;
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...restOptions,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...customHeaders,
@@ -71,61 +72,51 @@ export async function register(credentials) {
   });
 }
 
-export async function getProblems(token, difficulty) {
-  const difficultyQuery = difficulty ? `?difficulty=${encodeURIComponent(difficulty)}` : "";
-  return request(`/problems${difficultyQuery}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+export async function getSession() {
+  return request("/auth/session");
+}
+
+export async function logout() {
+  return request("/auth/logout", {
+    method: "POST",
   });
 }
 
-export async function runCode(token, payload) {
+export async function getProblems(difficulty) {
+  const difficultyQuery = difficulty ? `?difficulty=${encodeURIComponent(difficulty)}` : "";
+  return request(`/problems${difficultyQuery}`);
+}
+
+export async function runCode(payload) {
   return request("/run", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
     body: JSON.stringify(payload),
   });
 }
 
-export async function submitCode(token, payload) {
+export async function submitCode(payload) {
   return request("/submit", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
     body: JSON.stringify(payload),
   });
 }
 
-export async function getHints(token, problemId, stage) {
+export async function getHints(problemId, stage) {
   const encodedProblemId = encodeURIComponent(problemId);
   const stageQuery = stage ? `&stage=${encodeURIComponent(stage)}` : "";
-  return request(`/hints?problem_id=${encodedProblemId}${stageQuery}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  return request(`/hints?problem_id=${encodedProblemId}${stageQuery}`);
 }
 
-export async function uploadProblem(token, payload) {
+export async function uploadProblem(payload) {
   return request("/author/problems/upload", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
     body: JSON.stringify(payload),
   });
 }
 
-export async function resetProgress(token, problemId) {
+export async function resetProgress(problemId) {
   const encodedProblemId = encodeURIComponent(problemId);
   return request(`/progress/${encodedProblemId}`, {
     method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 }

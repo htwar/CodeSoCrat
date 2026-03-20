@@ -60,8 +60,8 @@ class RegisterRequest(StrictModel):
 
 
 class LoginResponse(StrictModel):
-    token: str
     user_id: str
+    email: str
     role: str
 
 

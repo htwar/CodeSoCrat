@@ -52,9 +52,14 @@ def _get_client_ip(request: Request) -> str:
 
 def _get_user_identifier(request: Request) -> Optional[str]:
     authorization = request.headers.get("authorization", "")
-    if not authorization.startswith("Bearer "):
+    token = None
+    if authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    else:
+        token = request.cookies.get(settings.session_cookie_name)
+    if not token:
         return None
-    decoded = try_decode_token(authorization.split(" ", 1)[1].strip())
+    decoded = try_decode_token(token)
     if decoded is None:
         return None
     user_id, _role = decoded

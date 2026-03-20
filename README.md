@@ -8,7 +8,7 @@ This repository now contains a starter backend and a basic React frontend for th
 - SQLite database schema managed by SQLAlchemy models
 - Seeded student and author accounts
 - Starter problems loaded on first run
-- Login endpoint with bearer-token auth
+- Login, registration, session restore, and logout with `HttpOnly` cookie auth
 - Problem listing endpoint
 - Author-only problem upload endpoint with schema validation
 - Submission evaluation pipeline with syntax, definition, runtime, timeout, and incorrect-output classification
@@ -62,6 +62,10 @@ Important values:
 
 - `CODESOCRAT_SECRET_KEY_CURRENT`
 - `CODESOCRAT_SECRET_KEY_PREVIOUS`
+- `CODESOCRAT_SESSION_COOKIE_NAME`
+- `CODESOCRAT_SESSION_COOKIE_SECURE`
+- `CODESOCRAT_SESSION_COOKIE_SAMESITE`
+- `CODESOCRAT_SESSION_COOKIE_MAX_AGE_SECONDS`
 - `CODESOCRAT_DOCKER_IMAGE`
 - `CODESOCRAT_DOCKER_AUTO_PULL`
 - `CODESOCRAT_DOCKER_PULL_TIMEOUT_SECONDS`
@@ -78,6 +82,7 @@ The frontend uses `frontend/.env` for:
 - The API now rejects unexpected request fields and applies stricter length and format validation to user input.
 - Rate limiting is enforced on public endpoints with IP-based limits and additional user-based limits for authenticated traffic and login attempts.
 - Session signing secrets are environment-driven. Rotate them by setting a new `CODESOCRAT_SECRET_KEY_CURRENT` and moving the prior value into `CODESOCRAT_SECRET_KEY_PREVIOUS`.
+- Authentication now uses an `HttpOnly` session cookie. For production HTTPS deployments, set `CODESOCRAT_SESSION_COOKIE_SECURE=true`.
 
 ## Database schema
 

@@ -1,6 +1,6 @@
 import Editor from "@monaco-editor/react";
 import { useEffect, useState } from "react";
-import { getHints, getProblems, login, register, resetProgress, runCode, submitCode, uploadProblem } from "./api";
+import { getHints, getProblems, getSession, login, logout, register, resetProgress, runCode, submitCode, uploadProblem } from "./api";
 
 const starterUploadTemplate = `{
   "problem_id": "multiply_two_numbers",
@@ -26,7 +26,6 @@ const starterUploadTemplate = `{
 
 const demoSolution = "def add_numbers(a, b):\n    return a + b\n";
 
-const SESSION_STORAGE_KEY = "codesocrat-session";
 const DIFFICULTIES = ["Easy", "Medium", "Hard"];
 const HINT_TYPE_LABELS = {
   0: "None",
@@ -312,7 +311,7 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
   );
 }
 
-function AuthorPanel({ token }) {
+function AuthorPanel() {
   const [jsonText, setJsonText] = useState(starterUploadTemplate);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -337,7 +336,7 @@ function AuthorPanel({ token }) {
 
     try {
       const payload = JSON.parse(jsonText);
-      const response = await uploadProblem(token, payload);
+      const response = await uploadProblem(payload);
       setMessage(`Uploaded ${response.problem_id} successfully.`);
     } catch (uploadError) {
       setError(uploadError.message);
@@ -380,14 +379,8 @@ function AuthorPanel({ token }) {
 }
 
 export default function App() {
-  const [session, setSession] = useState(() => {
-    try {
-      const storedSession = window.localStorage.getItem(SESSION_STORAGE_KEY);
-      return storedSession ? JSON.parse(storedSession) : null;
-    } catch (_error) {
-      return null;
-    }
-  });
+  const [session, setSession] = useState(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [problems, setProblems] = useState([]);
@@ -398,15 +391,33 @@ export default function App() {
   const [hintState, setHintState] = useState({ loadingStage: null, hints: null, error: "" });
 
   useEffect(() => {
-    if (session) {
-      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-      return;
+    let isActive = true;
+
+    async function restoreSession() {
+      try {
+        const response = await getSession();
+        if (isActive) {
+          setSession(response);
+        }
+      } catch (_error) {
+        if (isActive) {
+          setSession(null);
+        }
+      } finally {
+        if (isActive) {
+          setSessionLoading(false);
+        }
+      }
     }
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
-  }, [session]);
+
+    restoreSession();
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
-    if (!session?.token) {
+    if (!session) {
       return;
     }
 
@@ -414,7 +425,7 @@ export default function App() {
 
     async function loadProblems() {
       try {
-        const response = await getProblems(session.token, selectedDifficulty);
+        const response = await getProblems(selectedDifficulty);
         if (!isActive) {
           return;
         }
@@ -451,12 +462,12 @@ export default function App() {
   const currentCode = selectedProblem ? codeByProblem[selectedProblem.problem_id] || "" : "";
 
   useEffect(() => {
-    if (!selectedProblem || !session?.token) {
+    if (!selectedProblem || !session) {
       return;
     }
 
-    refreshHintState(selectedProblem.problem_id, session.token);
-  }, [selectedProblemId, session?.token]);
+    refreshHintState(selectedProblem.problem_id);
+  }, [selectedProblemId, session]);
 
   function updateCode(nextCode) {
     if (!selectedProblem) {
@@ -496,9 +507,9 @@ export default function App() {
     }
   }
 
-  async function refreshHintState(problemId, token) {
+  async function refreshHintState(problemId) {
     try {
-      const response = await getHints(token, problemId);
+      const response = await getHints(problemId);
       setHintState({ loadingStage: null, hints: response, error: "" });
     } catch (hintError) {
       if (String(hintError.message).includes("No hints unlocked yet")) {
@@ -522,7 +533,7 @@ export default function App() {
   }
 
   async function executeCode(action) {
-    if (!selectedProblem || !session?.token) {
+    if (!selectedProblem || !session) {
       return;
     }
 
@@ -533,18 +544,18 @@ export default function App() {
     }
 
     try {
-      const response = await (action === "Run" ? runCode(session.token, {
+      const response = await (action === "Run" ? runCode({
         problem_id: selectedProblem.problem_id,
         code: currentCode,
         timed_mode: false,
-      }) : submitCode(session.token, {
+      }) : submitCode({
         problem_id: selectedProblem.problem_id,
         code: currentCode,
         timed_mode: false,
       }));
       setSubmissionState({ loadingAction: null, result: response, error: "" });
       if (action === "Submit") {
-        await refreshHintState(selectedProblem.problem_id, session.token);
+        await refreshHintState(selectedProblem.problem_id);
       }
     } catch (submitError) {
       setSubmissionState({ loadingAction: null, result: null, error: submitError.message });
@@ -560,7 +571,7 @@ export default function App() {
   }
 
   async function handleUnlockHint(stage) {
-    if (!selectedProblem || !session?.token) {
+    if (!selectedProblem || !session) {
       return;
     }
 
@@ -571,7 +582,7 @@ export default function App() {
     }));
 
     try {
-      const response = await getHints(session.token, selectedProblem.problem_id, stage);
+      const response = await getHints(selectedProblem.problem_id, stage);
       setHintState({ loadingStage: null, hints: response, error: "" });
     } catch (hintError) {
       setHintState((current) => ({
@@ -583,12 +594,12 @@ export default function App() {
   }
 
   async function handleResetProgress() {
-    if (!selectedProblem || !session?.token) {
+    if (!selectedProblem || !session) {
       return;
     }
 
     try {
-      await resetProgress(session.token, selectedProblem.problem_id);
+      await resetProgress(selectedProblem.problem_id);
       setCodeByProblem((current) => ({
         ...current,
         [selectedProblem.problem_id]: selectedProblem.starter_code || "",
@@ -628,7 +639,12 @@ export default function App() {
     setHintState({ loadingStage: null, hints: null, error: "" });
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    try {
+      await logout();
+    } catch (_error) {
+      // Clearing client state is still correct even if the cookie is already gone.
+    }
     setSession(null);
     setProblems([]);
     setSelectedProblemId("");
@@ -636,6 +652,18 @@ export default function App() {
     setSubmissionState({ loadingAction: null, result: null, error: "" });
     setHintState({ loadingStage: null, hints: null, error: "" });
     setAuthError("");
+  }
+
+  if (sessionLoading) {
+    return (
+      <main className="app-shell auth-shell">
+        <section className="auth-card">
+          <p className="eyebrow">CodeSoCrat</p>
+          <h1>Restoring session</h1>
+          <p className="lede">Checking your secure session cookie.</p>
+        </section>
+      </main>
+    );
   }
 
   if (!session) {
@@ -682,7 +710,7 @@ export default function App() {
         />
       </section>
 
-      {session.role === "Author" ? <AuthorPanel token={session.token} /> : null}
+      {session.role === "Author" ? <AuthorPanel /> : null}
     </main>
   );
 }
