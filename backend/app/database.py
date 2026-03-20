@@ -30,6 +30,8 @@ def ensure_schema_evolution() -> None:
 
     existing_columns = {column["name"] for column in inspector.get_columns("submissions")}
     statements = []
+    if "execution_type" not in existing_columns:
+        statements.append("ALTER TABLE submissions ADD COLUMN execution_type TEXT DEFAULT 'Submit'")
     if "error_line" not in existing_columns:
         statements.append("ALTER TABLE submissions ADD COLUMN error_line INTEGER")
     if "error_excerpt" not in existing_columns:

@@ -85,6 +85,7 @@ class Submission(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     problem_id: Mapped[int] = mapped_column(ForeignKey("problems.id"), index=True)
+    execution_type: Mapped[str] = mapped_column(String(16), default="Submit")
     code: Mapped[str] = mapped_column(Text)
     timed_mode: Mapped[bool] = mapped_column(Boolean, default=False)
     result: Mapped[str] = mapped_column(String(16))

@@ -101,6 +101,7 @@ class SubmissionRequest(StrictModel):
 
 class SubmissionResponse(StrictModel):
     submission_id: str
+    execution_type: str
     result: str
     failure_category: Optional[str]
     runtime_ms: int
@@ -109,6 +110,7 @@ class SubmissionResponse(StrictModel):
     hint_stage_unlocked: int
     answer_key_unlocked: bool
     feedback: str
+    counts_toward_progress: bool
 
 
 class HintResponse(StrictModel):

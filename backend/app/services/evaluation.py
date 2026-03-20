@@ -152,16 +152,42 @@ class DockerSandboxExecutor:
             timeout=3,
         )
         if image_check.returncode != 0:
+            auto_pull_error = self._ensure_docker_image()
+            if auto_pull_error is None:
+                return None
             return EvaluationResult(
                 result="Fail",
                 failure_category=FAILURE_RUNTIME,
                 runtime_ms=0,
                 memory_mb=self._memory_limit_mb(),
-                feedback=f"Docker image '{settings.docker_image}' is not available locally. Run: docker pull {settings.docker_image}",
+                feedback=auto_pull_error,
                 valid_attempt=False,
             )
 
         return None
+
+    def _ensure_docker_image(self) -> Optional[str]:
+        if not settings.docker_auto_pull:
+            return f"Docker image '{settings.docker_image}' is not available locally. Run: docker pull {settings.docker_image}"
+
+        try:
+            # Pull once on demand so local development recovers automatically after image cleanup.
+            pull = subprocess.run(
+                ["docker", "pull", settings.docker_image],
+                capture_output=True,
+                text=True,
+                timeout=settings.docker_pull_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            return f"Docker image pull for '{settings.docker_image}' timed out."
+        except FileNotFoundError:
+            return "Docker is not installed on the server."
+
+        if pull.returncode == 0:
+            return None
+
+        combined = "\n".join(part for part in [(pull.stdout or "").strip(), (pull.stderr or "").strip()] if part)
+        return combined or f"Docker image '{settings.docker_image}' is not available locally and could not be pulled automatically."
 
     def _classify_container_result(self, *, completed: subprocess.CompletedProcess[str], runtime_ms: int) -> EvaluationResult:
         stdout = (completed.stdout or "").strip()

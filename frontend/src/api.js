@@ -80,8 +80,18 @@ export async function getProblems(token, difficulty) {
   });
 }
 
+export async function runCode(token, payload) {
+  return request("/run", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function submitCode(token, payload) {
-  return request("/submissions", {
+  return request("/submit", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

@@ -62,6 +62,9 @@ Important values:
 
 - `CODESOCRAT_SECRET_KEY_CURRENT`
 - `CODESOCRAT_SECRET_KEY_PREVIOUS`
+- `CODESOCRAT_DOCKER_IMAGE`
+- `CODESOCRAT_DOCKER_AUTO_PULL`
+- `CODESOCRAT_DOCKER_PULL_TIMEOUT_SECONDS`
 - `CODESOCRAT_OLLAMA_BASE_URL`
 - `CODESOCRAT_OLLAMA_MODEL`
 - `CODESOCRAT_RATE_LIMIT_*`
@@ -100,3 +103,4 @@ Submissions are executed with `docker run` using:
 - dropped Linux capabilities
 
 Make sure Docker Desktop or the Docker daemon is running before submitting code through the API.
+If the sandbox image is missing locally, the backend now attempts to pull `CODESOCRAT_DOCKER_IMAGE` automatically by default.

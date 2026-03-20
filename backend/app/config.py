@@ -44,6 +44,8 @@ class Settings(BaseModel):
     evaluation_memory_bytes: int = 128 * 1024 * 1024
     docker_startup_timeout_seconds: int = int(os.getenv("CODESOCRAT_DOCKER_STARTUP_TIMEOUT_SECONDS", "10"))
     docker_image: str = os.getenv("CODESOCRAT_DOCKER_IMAGE", "python:3.11-alpine")
+    docker_auto_pull: bool = os.getenv("CODESOCRAT_DOCKER_AUTO_PULL", "true").lower() == "true"
+    docker_pull_timeout_seconds: int = int(os.getenv("CODESOCRAT_DOCKER_PULL_TIMEOUT_SECONDS", "120"))
     docker_cpus: str = os.getenv("CODESOCRAT_DOCKER_CPUS", "0.5")
     docker_pids_limit: int = int(os.getenv("CODESOCRAT_DOCKER_PIDS_LIMIT", "64"))
     ollama_base_url: str = os.getenv("CODESOCRAT_OLLAMA_BASE_URL", "http://127.0.0.1:11434")

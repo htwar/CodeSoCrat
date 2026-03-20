@@ -1,6 +1,6 @@
 import Editor from "@monaco-editor/react";
 import { useEffect, useState } from "react";
-import { getHints, getProblems, login, register, resetProgress, submitCode, uploadProblem } from "./api";
+import { getHints, getProblems, login, register, resetProgress, runCode, submitCode, uploadProblem } from "./api";
 
 const starterUploadTemplate = `{
   "problem_id": "multiply_two_numbers",
@@ -28,6 +28,12 @@ const demoSolution = "def add_numbers(a, b):\n    return a + b\n";
 
 const SESSION_STORAGE_KEY = "codesocrat-session";
 const DIFFICULTIES = ["Easy", "Medium", "Hard"];
+const HINT_TYPE_LABELS = {
+  0: "None",
+  1: "Conceptual",
+  2: "Strategic",
+  3: "Syntactic",
+};
 
 function AuthPanel({ onLogin, onRegister, loading, error }) {
   const [mode, setMode] = useState("login");
@@ -149,6 +155,7 @@ function SubmissionPanel({
   problem,
   code,
   setCode,
+  onRun,
   onSubmit,
   onResetProgress,
   submissionState,
@@ -209,8 +216,16 @@ function SubmissionPanel({
           />
         </div>
         <div className="editor-actions">
-          <button type="button" onClick={onSubmit} disabled={submissionState.loading}>
-            {submissionState.loading ? "Running..." : "Run Submission"}
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onRun}
+            disabled={Boolean(submissionState.loadingAction)}
+          >
+            {submissionState.loadingAction === "Run" ? "Running..." : "Run"}
+          </button>
+          <button type="button" onClick={onSubmit} disabled={Boolean(submissionState.loadingAction)}>
+            {submissionState.loadingAction === "Submit" ? "Submitting..." : "Submit"}
           </button>
           <button type="button" className="ghost-button" onClick={() => setCode(demoSolution)}>
             Load Demo Pass
@@ -222,9 +237,10 @@ function SubmissionPanel({
             <h3>{submissionState.result.result}</h3>
             <p>{submissionState.result.feedback}</p>
             <div className="result-grid">
+              <span>Last Action: {submissionState.result.execution_type}</span>
               <span>Failure Category: {submissionState.result.failure_category || "None"}</span>
               <span>Runtime: {submissionState.result.runtime_ms} ms</span>
-              <span>Hint Stage: {submissionState.result.hint_stage_unlocked}</span>
+              <span>Highest Hint Type: {HINT_TYPE_LABELS[submissionState.result.hint_stage_unlocked] || "None"}</span>
               <span>Valid Failed Attempts: {submissionState.result.valid_failed_attempts}</span>
             </div>
           </div>
@@ -285,7 +301,7 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
           ? content
           : isUnlocked
             ? "This hint is unlocked and ready. Reveal it when you want more guidance."
-            : "Locked until you earn this hint stage."}
+            : "Locked until you earn this hint type."}
       </p>
       {isUnlocked && !content ? (
         <button type="button" className="secondary-button" onClick={() => onUnlockHint(stage)} disabled={isLoading}>
@@ -378,7 +394,7 @@ export default function App() {
   const [selectedDifficulty, setSelectedDifficulty] = useState("Easy");
   const [selectedProblemId, setSelectedProblemId] = useState("");
   const [codeByProblem, setCodeByProblem] = useState({});
-  const [submissionState, setSubmissionState] = useState({ loading: false, result: null, error: "" });
+  const [submissionState, setSubmissionState] = useState({ loadingAction: null, result: null, error: "" });
   const [hintState, setHintState] = useState({ loadingStage: null, hints: null, error: "" });
 
   useEffect(() => {
@@ -505,27 +521,42 @@ export default function App() {
     }
   }
 
-  async function handleSubmit() {
+  async function executeCode(action) {
     if (!selectedProblem || !session?.token) {
       return;
     }
 
-    setSubmissionState({ loading: true, result: null, error: "" });
-    setHintState({ loadingStage: null, hints: null, error: "" });
+    setSubmissionState({ loadingAction: action, result: null, error: "" });
+    if (action === "Submit") {
+      // A new official submission can change hint availability, so we clear and refetch.
+      setHintState({ loadingStage: null, hints: null, error: "" });
+    }
 
     try {
-      const response = await submitCode(session.token, {
+      const response = await (action === "Run" ? runCode(session.token, {
         problem_id: selectedProblem.problem_id,
         code: currentCode,
         timed_mode: false,
-      });
-      setSubmissionState({ loading: false, result: response, error: "" });
-      if (response.hint_stage_unlocked > 0) {
+      }) : submitCode(session.token, {
+        problem_id: selectedProblem.problem_id,
+        code: currentCode,
+        timed_mode: false,
+      }));
+      setSubmissionState({ loadingAction: null, result: response, error: "" });
+      if (action === "Submit") {
         await refreshHintState(selectedProblem.problem_id, session.token);
       }
     } catch (submitError) {
-      setSubmissionState({ loading: false, result: null, error: submitError.message });
+      setSubmissionState({ loadingAction: null, result: null, error: submitError.message });
     }
+  }
+
+  async function handleRun() {
+    await executeCode("Run");
+  }
+
+  async function handleSubmit() {
+    await executeCode("Submit");
   }
 
   async function handleUnlockHint(stage) {
@@ -562,7 +593,7 @@ export default function App() {
         ...current,
         [selectedProblem.problem_id]: selectedProblem.starter_code || "",
       }));
-      setSubmissionState({ loading: false, result: null, error: "" });
+      setSubmissionState({ loadingAction: null, result: null, error: "" });
       setHintState({
         loadingStage: null,
         hints: {
@@ -587,13 +618,13 @@ export default function App() {
 
   function handleSelectProblem(problemId) {
     setSelectedProblemId(problemId);
-    setSubmissionState({ loading: false, result: null, error: "" });
+    setSubmissionState({ loadingAction: null, result: null, error: "" });
     setHintState({ loadingStage: null, hints: null, error: "" });
   }
 
   function handleDifficultyChange(difficulty) {
     setSelectedDifficulty(difficulty);
-    setSubmissionState({ loading: false, result: null, error: "" });
+    setSubmissionState({ loadingAction: null, result: null, error: "" });
     setHintState({ loadingStage: null, hints: null, error: "" });
   }
 
@@ -602,7 +633,7 @@ export default function App() {
     setProblems([]);
     setSelectedProblemId("");
     setCodeByProblem({});
-    setSubmissionState({ loading: false, result: null, error: "" });
+    setSubmissionState({ loadingAction: null, result: null, error: "" });
     setHintState({ loadingStage: null, hints: null, error: "" });
     setAuthError("");
   }
@@ -642,6 +673,7 @@ export default function App() {
           problem={selectedProblem}
           code={currentCode}
           setCode={updateCode}
+          onRun={handleRun}
           onSubmit={handleSubmit}
           onResetProgress={handleResetProgress}
           submissionState={submissionState}

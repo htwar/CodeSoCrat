@@ -106,6 +106,28 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()["token"]
 
+    def _submit(self, headers: dict[str, str], problem_id: str, code: str):
+        return self.client.post(
+            "/submit",
+            headers=headers,
+            json={
+                "problem_id": problem_id,
+                "code": code,
+                "timed_mode": False,
+            },
+        )
+
+    def _run(self, headers: dict[str, str], problem_id: str, code: str):
+        return self.client.post(
+            "/run",
+            headers=headers,
+            json={
+                "problem_id": problem_id,
+                "code": code,
+                "timed_mode": False,
+            },
+        )
+
     def test_register_creates_student_account(self) -> None:
         response = self.client.post(
             "/auth/register",
@@ -145,18 +167,11 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(problems.status_code, 200)
         self.assertTrue(problems.json()["problems"])
 
-        response = self.client.post(
-            "/submissions",
-            headers=headers,
-            json={
-                "problem_id": "sum_two_numbers",
-                "code": "def add_numbers(a, b):\n    return a - b\n",
-                "timed_mode": False,
-            },
-        )
+        response = self._submit(headers, "sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["result"], "Fail")
+        self.assertEqual(payload["execution_type"], "Submit")
         self.assertEqual(payload["hint_stage_unlocked"], 1)
 
         hints = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers"})
@@ -170,19 +185,28 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(unlocked.json()["conceptual"], "generated-stage-1")
         self.assertIsNone(unlocked.json()["strategic"])
 
+    def test_run_does_not_unlock_hints_or_increment_attempts(self) -> None:
+        token = self._login("student@codesocrat.dev", "studentpass")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = self._run(headers, "sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["result"], "Fail")
+        self.assertEqual(payload["execution_type"], "Run")
+        self.assertEqual(payload["valid_failed_attempts"], 0)
+        self.assertEqual(payload["hint_stage_unlocked"], 0)
+        self.assertFalse(payload["counts_toward_progress"])
+
+        hints = self.client.get("/hints", headers=headers, params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(hints.status_code, 403)
+        self.assertEqual(hints.json()["detail"], "No hints unlocked yet.")
+
     def test_syntax_failure_unlocks_only_syntactic_hint(self) -> None:
         token = self._login("student@codesocrat.dev", "studentpass")
         headers = {"Authorization": f"Bearer {token}"}
 
-        response = self.client.post(
-            "/submissions",
-            headers=headers,
-            json={
-                "problem_id": "sum_two_numbers",
-                "code": "def add_numbers(a, b)\n    return a + b\n",
-                "timed_mode": False,
-            },
-        )
+        response = self._submit(headers, "sum_two_numbers", "def add_numbers(a, b)\n    return a + b\n")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["result"], "Fail")
@@ -206,26 +230,10 @@ class BackendFlowTests(unittest.TestCase):
         headers = {"Authorization": f"Bearer {token}"}
 
         for _ in range(3):
-            response = self.client.post(
-                "/submissions",
-                headers=headers,
-                json={
-                    "problem_id": "sum_two_numbers",
-                    "code": "def add_numbers(a, b):\n    return a - b\n",
-                    "timed_mode": False,
-                },
-            )
+            response = self._submit(headers, "sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
             self.assertEqual(response.status_code, 200)
 
-        syntax_response = self.client.post(
-            "/submissions",
-            headers=headers,
-            json={
-                "problem_id": "sum_two_numbers",
-                "code": "def add_numbers(a, b):\n    return a + \n",
-                "timed_mode": False,
-            },
-        )
+        syntax_response = self._submit(headers, "sum_two_numbers", "def add_numbers(a, b):\n    return a + \n")
         self.assertEqual(syntax_response.status_code, 200)
         self.assertEqual(syntax_response.json()["failure_category"], "SyntaxError")
 
@@ -250,33 +258,18 @@ class BackendFlowTests(unittest.TestCase):
         token = self._login("student@codesocrat.dev", "studentpass")
         headers = {"Authorization": f"Bearer {token}"}
 
-        response = self.client.post(
-            "/submissions",
-            headers=headers,
-            json={
-                "problem_id": "sum_two_numbers",
-                "code": "def add_numbers(a, b):\n    return a + b\n",
-                "timed_mode": False,
-            },
-        )
+        response = self._submit(headers, "sum_two_numbers", "def add_numbers(a, b):\n    return a + b\n")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["result"], "Pass")
+        self.assertEqual(payload["execution_type"], "Submit")
         self.assertIsNone(payload["failure_category"])
 
     def test_is_even_problem_rejects_weak_false_positive_solution(self) -> None:
         token = self._login("student@codesocrat.dev", "studentpass")
         headers = {"Authorization": f"Bearer {token}"}
 
-        response = self.client.post(
-            "/submissions",
-            headers=headers,
-            json={
-                "problem_id": "is_even_number",
-                "code": "def is_even(n):\n    return n - 2 == 0\n",
-                "timed_mode": False,
-            },
-        )
+        response = self._submit(headers, "is_even_number", "def is_even(n):\n    return n - 2 == 0\n")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["result"], "Fail")
@@ -331,7 +324,7 @@ class BackendFlowTests(unittest.TestCase):
         token = self._login("student@codesocrat.dev", "studentpass")
         headers = {"Authorization": f"Bearer {token}"}
         response = self.client.post(
-            "/submissions",
+            "/submit",
             headers=headers,
             json={"problem_id": "../bad", "code": "print(1)", "timed_mode": False},
         )
@@ -358,15 +351,7 @@ class BackendFlowTests(unittest.TestCase):
         token = self._login("student@codesocrat.dev", "studentpass")
         headers = {"Authorization": f"Bearer {token}"}
 
-        failed = self.client.post(
-            "/submissions",
-            headers=headers,
-            json={
-                "problem_id": "sum_two_numbers",
-                "code": "def add_numbers(a, b):\n    return a - b\n",
-                "timed_mode": False,
-            },
-        )
+        failed = self._submit(headers, "sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
         self.assertEqual(failed.status_code, 200)
         self.assertEqual(failed.json()["hint_stage_unlocked"], 1)
 

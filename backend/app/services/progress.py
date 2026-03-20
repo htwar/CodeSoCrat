@@ -24,10 +24,14 @@ class ProgressService:
         self,
         *,
         progress: UserProblemProgress,
+        execution_type: str,
         result: str,
         failure_category: Optional[str],
         valid_attempt: bool,
     ) -> UserProblemProgress:
+        if execution_type != "Submit":
+            return progress
+
         if result == "Pass":
             progress.completed = True
             progress.last_failure_category = None

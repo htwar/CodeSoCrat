@@ -116,11 +116,12 @@ def list_problems(
     return ProblemListResponse(problems=[ProblemSummary.model_validate(problem) for problem in problems])
 
 
-@app.post("/submissions", response_model=SubmissionResponse)
-def submit_code(
+def _execute_code(
+    *,
+    execution_type: str,
     payload: SubmissionRequest,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    user: User,
+    db: Session,
 ) -> SubmissionResponse:
     problem = (
         db.query(Problem)
@@ -139,8 +140,10 @@ def submit_code(
     )
 
     progress = progress_service.get_or_create(db, user=user, problem=problem)
+    # Only official Submit executions are allowed to change hint/answer-key progression.
     progress_service.apply_submission_outcome(
         progress=progress,
+        execution_type=execution_type,
         result=evaluation.result,
         failure_category=evaluation.failure_category,
         valid_attempt=evaluation.valid_attempt,
@@ -149,6 +152,7 @@ def submit_code(
     submission = Submission(
         user_id=user.id,
         problem_id=problem.id,
+        execution_type=execution_type,
         code=payload.code,
         timed_mode=payload.timed_mode,
         result=evaluation.result,
@@ -166,6 +170,7 @@ def submit_code(
 
     return SubmissionResponse(
         submission_id=str(submission.id),
+        execution_type=execution_type,
         result=evaluation.result,
         failure_category=evaluation.failure_category,
         runtime_ms=evaluation.runtime_ms,
@@ -174,7 +179,36 @@ def submit_code(
         hint_stage_unlocked=progress.unlocked_stage,
         answer_key_unlocked=progress.answer_key_unlocked,
         feedback=evaluation.feedback,
+        counts_toward_progress=execution_type == "Submit" and evaluation.result == "Fail" and evaluation.valid_attempt,
     )
+
+
+@app.post("/run", response_model=SubmissionResponse)
+def run_code(
+    payload: SubmissionRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SubmissionResponse:
+    return _execute_code(execution_type="Run", payload=payload, user=user, db=db)
+
+
+@app.post("/submit", response_model=SubmissionResponse)
+def submit_code(
+    payload: SubmissionRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SubmissionResponse:
+    return _execute_code(execution_type="Submit", payload=payload, user=user, db=db)
+
+
+@app.post("/submissions", response_model=SubmissionResponse)
+def submit_code_legacy(
+    payload: SubmissionRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SubmissionResponse:
+    # Backward-compatible alias for existing clients while the UI moves to /submit.
+    return _execute_code(execution_type="Submit", payload=payload, user=user, db=db)
 
 
 @app.get("/hints", response_model=HintResponse)
@@ -197,7 +231,11 @@ def get_hints(
 
     latest_submission = (
         db.query(Submission)
-        .filter(Submission.user_id == user.id, Submission.problem_id == problem.id)
+        .filter(
+            Submission.user_id == user.id,
+            Submission.problem_id == problem.id,
+            Submission.execution_type == "Submit",
+        )
         .order_by(Submission.created_at.desc(), Submission.id.desc())
         .first()
     )
