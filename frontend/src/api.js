@@ -1,4 +1,16 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const CSRF_COOKIE_NAME = "codesocrat_csrf";
+
+function getCookie(name) {
+  const cookies = document.cookie ? document.cookie.split("; ") : [];
+  for (const cookie of cookies) {
+    const [cookieName, ...rest] = cookie.split("=");
+    if (cookieName === name) {
+      return decodeURIComponent(rest.join("="));
+    }
+  }
+  return "";
+}
 
 function formatValidationError(item) {
   const location = Array.isArray(item.loc) ? item.loc.join(".") : "";
@@ -27,11 +39,20 @@ function formatValidationError(item) {
 
 async function request(path, options = {}) {
   const { headers: customHeaders = {}, ...restOptions } = options;
+  const method = (restOptions.method || "GET").toUpperCase();
+  const csrfHeaders = {};
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const csrfToken = getCookie(CSRF_COOKIE_NAME);
+    if (csrfToken) {
+      csrfHeaders["X-CSRF-Token"] = csrfToken;
+    }
+  }
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...restOptions,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...csrfHeaders,
       ...customHeaders,
     },
   });

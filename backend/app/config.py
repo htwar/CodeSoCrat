@@ -40,6 +40,8 @@ class Settings(BaseModel):
         if origin.strip()
     ]
     session_cookie_name: str = os.getenv("CODESOCRAT_SESSION_COOKIE_NAME", "codesocrat_session")
+    csrf_cookie_name: str = os.getenv("CODESOCRAT_CSRF_COOKIE_NAME", "codesocrat_csrf")
+    csrf_header_name: str = os.getenv("CODESOCRAT_CSRF_HEADER_NAME", "X-CSRF-Token")
     session_cookie_secure: bool = os.getenv("CODESOCRAT_SESSION_COOKIE_SECURE", "false").lower() == "true"
     session_cookie_samesite: str = os.getenv("CODESOCRAT_SESSION_COOKIE_SAMESITE", "lax")
     session_cookie_max_age_seconds: int = int(os.getenv("CODESOCRAT_SESSION_COOKIE_MAX_AGE_SECONDS", str(7 * 24 * 60 * 60)))

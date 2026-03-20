@@ -106,11 +106,18 @@ class BackendFlowTests(unittest.TestCase):
         response = self.client.post("/auth/login", json={"email": email, "password": password})
         self.assertEqual(response.status_code, 200)
         self.assertIn("codesocrat_session", response.cookies)
+        self.assertIn("codesocrat_csrf", response.cookies)
         return response.json()
+
+    def _csrf_headers(self) -> dict[str, str]:
+        csrf = self.client.cookies.get("codesocrat_csrf")
+        self.assertTrue(csrf)
+        return {"X-CSRF-Token": csrf}
 
     def _submit(self, problem_id: str, code: str):
         return self.client.post(
             "/submit",
+            headers=self._csrf_headers(),
             json={
                 "problem_id": problem_id,
                 "code": code,
@@ -121,6 +128,7 @@ class BackendFlowTests(unittest.TestCase):
     def _run(self, problem_id: str, code: str):
         return self.client.post(
             "/run",
+            headers=self._csrf_headers(),
             json={
                 "problem_id": problem_id,
                 "code": code,
@@ -142,6 +150,7 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(payload["role"], "Student")
         self.assertEqual(payload["email"], "new.student@example.com")
         self.assertIn("codesocrat_session", response.cookies)
+        self.assertIn("codesocrat_csrf", response.cookies)
 
         login = self.client.post(
             "/auth/login",
@@ -168,11 +177,24 @@ class BackendFlowTests(unittest.TestCase):
 
     def test_logout_clears_cookie_session(self) -> None:
         self._login("student@codesocrat.dev", "studentpass")
-        logout = self.client.post("/auth/logout")
+        logout = self.client.post("/auth/logout", headers=self._csrf_headers())
         self.assertEqual(logout.status_code, 204)
 
         after_logout = self.client.get("/auth/session")
         self.assertEqual(after_logout.status_code, 401)
+
+    def test_state_change_without_csrf_is_rejected(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+        response = self.client.post(
+            "/submit",
+            json={
+                "problem_id": "sum_two_numbers",
+                "code": "def add_numbers(a, b):\n    return a + b\n",
+                "timed_mode": False,
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"], "CSRF validation failed.")
 
     def test_student_submission_unlocks_hint(self) -> None:
         self._login("student@codesocrat.dev", "studentpass")
@@ -289,6 +311,7 @@ class BackendFlowTests(unittest.TestCase):
 
         response = self.client.post(
             "/author/problems/upload",
+            headers=self._csrf_headers(),
             json={
                 "problem_id": "double_number",
                 "title": "Double Number",
@@ -307,6 +330,7 @@ class BackendFlowTests(unittest.TestCase):
 
         response = self.client.post(
             "/author/problems/upload",
+            headers=self._csrf_headers(),
             json={
                 "problem_id": "bad-problem",
                 "title": "Bad Problem",
@@ -329,6 +353,7 @@ class BackendFlowTests(unittest.TestCase):
         self._login("student@codesocrat.dev", "studentpass")
         response = self.client.post(
             "/submit",
+            headers=self._csrf_headers(),
             json={"problem_id": "../bad", "code": "print(1)", "timed_mode": False},
         )
         self.assertEqual(response.status_code, 422)
@@ -356,7 +381,7 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(failed.status_code, 200)
         self.assertEqual(failed.json()["hint_stage_unlocked"], 1)
 
-        reset = self.client.delete("/progress/sum_two_numbers")
+        reset = self.client.delete("/progress/sum_two_numbers", headers=self._csrf_headers())
         self.assertEqual(reset.status_code, 200)
         self.assertEqual(reset.json()["success"], True)
 

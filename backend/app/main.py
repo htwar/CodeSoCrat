@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import create_token, get_current_user, hash_password, require_author, verify_password
+from app.auth import create_csrf_token, create_token, get_current_user, hash_password, require_author, require_csrf, verify_password
 from app.config import settings
 from app.database import Base, SessionLocal, engine, ensure_schema_evolution, get_db
 from app.models import GeneratedHint, Problem, Submission, TestCase, User, UserProblemProgress
@@ -80,12 +80,28 @@ def _set_session_cookie(response: Response, token: str) -> None:
         max_age=settings.session_cookie_max_age_seconds,
         path="/",
     )
+    response.set_cookie(
+        key=settings.csrf_cookie_name,
+        value=create_csrf_token(token),
+        httponly=False,
+        secure=settings.session_cookie_secure,
+        samesite=settings.session_cookie_samesite,
+        max_age=settings.session_cookie_max_age_seconds,
+        path="/",
+    )
 
 
 def _clear_session_cookie(response: Response) -> None:
     response.delete_cookie(
         key=settings.session_cookie_name,
         httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite=settings.session_cookie_samesite,
+        path="/",
+    )
+    response.delete_cookie(
+        key=settings.csrf_cookie_name,
+        httponly=False,
         secure=settings.session_cookie_secure,
         samesite=settings.session_cookie_samesite,
         path="/",
@@ -128,12 +144,15 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
 
 
 @app.get("/auth/session", response_model=LoginResponse)
-def get_session(user: User = Depends(get_current_user)) -> LoginResponse:
+def get_session(response: Response, request: Request, user: User = Depends(get_current_user)) -> LoginResponse:
+    session_token = request.cookies.get(settings.session_cookie_name)
+    if session_token:
+        _set_session_cookie(response, session_token)
     return LoginResponse(user_id=str(user.id), email=user.email, role=user.role)
 
 
 @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
-def logout() -> Response:
+def logout(_csrf: None = Depends(require_csrf)) -> Response:
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     _clear_session_cookie(response)
     return response
@@ -222,6 +241,7 @@ def _execute_code(
 @app.post("/run", response_model=SubmissionResponse)
 def run_code(
     payload: SubmissionRequest,
+    _csrf: None = Depends(require_csrf),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SubmissionResponse:
@@ -231,6 +251,7 @@ def run_code(
 @app.post("/submit", response_model=SubmissionResponse)
 def submit_code(
     payload: SubmissionRequest,
+    _csrf: None = Depends(require_csrf),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SubmissionResponse:
@@ -240,6 +261,7 @@ def submit_code(
 @app.post("/submissions", response_model=SubmissionResponse)
 def submit_code_legacy(
     payload: SubmissionRequest,
+    _csrf: None = Depends(require_csrf),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SubmissionResponse:
@@ -324,6 +346,7 @@ def get_hints(
 @app.post("/author/problems/upload", response_model=ProblemUploadResponse)
 def upload_problem(
     payload: ProblemUploadPayload,
+    _csrf: None = Depends(require_csrf),
     user: User = Depends(require_author),
     db: Session = Depends(get_db),
 ) -> ProblemUploadResponse:
@@ -339,6 +362,7 @@ def upload_problem(
 @app.delete("/progress/{problem_id}", response_model=ResetProgressResponse)
 def reset_problem_progress(
     problem_id: str,
+    _csrf: None = Depends(require_csrf),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ResetProgressResponse:
