@@ -306,6 +306,10 @@ button:disabled {
   min-height: 320px;
 }
 
+.answer-key-frame {
+  margin-top: 14px;
+}
+
 .editor-actions {
   display: flex;
   gap: 12px;

@@ -248,3 +248,10 @@ class ProblemUploadResponse(StrictModel):
 class ResetProgressResponse(StrictModel):
     success: bool
     problem_id: str
+
+
+class AnswerKeyResponse(StrictModel):
+    problem_id: str
+    unlocked: bool
+    solution_code: Optional[str] = None
+    explanation: Optional[str] = None

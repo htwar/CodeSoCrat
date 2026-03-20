@@ -1,6 +1,6 @@
 import Editor from "@monaco-editor/react";
 import { useEffect, useState } from "react";
-import { getHints, getProblems, getSession, login, logout, register, resetProgress, runCode, submitCode, uploadProblem } from "./api";
+import { getAnswerKey, getHints, getProblems, getSession, login, logout, register, resetProgress, runCode, submitCode, uploadProblem } from "./api";
 
 const starterUploadTemplate = `{
   "problem_id": "multiply_two_numbers",
@@ -159,6 +159,8 @@ function SubmissionPanel({
   onResetProgress,
   submissionState,
   hintState,
+  answerKeyState,
+  onViewAnswerKey,
   onUnlockHint,
 }) {
   const editorOptions = {
@@ -272,6 +274,7 @@ function SubmissionPanel({
           hintState={hintState}
           onUnlockHint={onUnlockHint}
         />
+        <AnswerKeyCard answerKeyState={answerKeyState} onViewAnswerKey={onViewAnswerKey} />
       </div>
     </section>
   );
@@ -305,6 +308,59 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
       {isUnlocked && !content ? (
         <button type="button" className="secondary-button" onClick={() => onUnlockHint(stage)} disabled={isLoading}>
           {isLoading ? "Unlocking..." : "Unlock Hint"}
+        </button>
+      ) : null}
+    </article>
+  );
+}
+
+function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
+  const isUnlocked = answerKeyState.unlocked;
+  const hasContent = Boolean(answerKeyState.content);
+
+  return (
+    <article
+      className={[
+        "hint-card",
+        hasContent ? "unlocked" : "locked",
+        isUnlocked ? "highlighted" : "",
+      ].join(" ").trim()}
+    >
+      <h3>Answer Key</h3>
+      {hasContent ? (
+        <>
+          <p>{answerKeyState.content.explanation}</p>
+          <div className="editor-frame answer-key-frame">
+            <Editor
+              defaultLanguage="python"
+              language="python"
+              value={answerKeyState.content.solution_code}
+              options={{
+                automaticLayout: true,
+                fontSize: 14,
+                lineNumbers: "on",
+                minimap: { enabled: false },
+                readOnly: true,
+                renderLineHighlight: "none",
+                scrollBeyondLastLine: false,
+                wordWrap: "on",
+              }}
+              theme="vs"
+              height="200px"
+            />
+          </div>
+        </>
+      ) : (
+        <p>
+          {isUnlocked
+            ? "You have earned the answer key for this problem. Reveal it when you are ready to compare your work."
+            : "Locked until you reach three valid failed Submit attempts on this problem."}
+        </p>
+      )}
+      {answerKeyState.error ? <p className="error-text">{answerKeyState.error}</p> : null}
+      {isUnlocked && !hasContent ? (
+        <button type="button" className="secondary-button" onClick={onViewAnswerKey} disabled={answerKeyState.loading}>
+          {answerKeyState.loading ? "Loading..." : "View Answer Key"}
         </button>
       ) : null}
     </article>
@@ -389,6 +445,7 @@ export default function App() {
   const [codeByProblem, setCodeByProblem] = useState({});
   const [submissionState, setSubmissionState] = useState({ loadingAction: null, result: null, error: "" });
   const [hintState, setHintState] = useState({ loadingStage: null, hints: null, error: "" });
+  const [answerKeyState, setAnswerKeyState] = useState({ unlocked: false, loading: false, content: null, error: "" });
 
   useEffect(() => {
     let isActive = true;
@@ -467,6 +524,7 @@ export default function App() {
     }
 
     refreshHintState(selectedProblem.problem_id);
+    refreshAnswerKeyState(selectedProblem.problem_id);
   }, [selectedProblemId, session]);
 
   function updateCode(nextCode) {
@@ -532,6 +590,20 @@ export default function App() {
     }
   }
 
+  async function refreshAnswerKeyState(problemId) {
+    try {
+      const response = await getAnswerKey(problemId);
+      setAnswerKeyState({
+        unlocked: response.unlocked,
+        loading: false,
+        content: response.unlocked ? response : null,
+        error: "",
+      });
+    } catch (answerKeyError) {
+      setAnswerKeyState({ unlocked: false, loading: false, content: null, error: answerKeyError.message });
+    }
+  }
+
   async function executeCode(action) {
     if (!selectedProblem || !session) {
       return;
@@ -541,6 +613,7 @@ export default function App() {
     if (action === "Submit") {
       // A new official submission can change hint availability, so we clear and refetch.
       setHintState({ loadingStage: null, hints: null, error: "" });
+      setAnswerKeyState((current) => ({ ...current, error: "" }));
     }
 
     try {
@@ -556,6 +629,7 @@ export default function App() {
       setSubmissionState({ loadingAction: null, result: response, error: "" });
       if (action === "Submit") {
         await refreshHintState(selectedProblem.problem_id);
+        await refreshAnswerKeyState(selectedProblem.problem_id);
       }
     } catch (submitError) {
       setSubmissionState({ loadingAction: null, result: null, error: submitError.message });
@@ -618,6 +692,7 @@ export default function App() {
         },
         error: "",
       });
+      setAnswerKeyState({ unlocked: false, loading: false, content: null, error: "" });
     } catch (resetError) {
       setHintState((current) => ({
         loadingStage: null,
@@ -627,16 +702,46 @@ export default function App() {
     }
   }
 
+  async function handleViewAnswerKey() {
+    if (!selectedProblem || !session) {
+      return;
+    }
+
+    setAnswerKeyState((current) => ({
+      ...current,
+      loading: true,
+      error: "",
+    }));
+
+    try {
+      const response = await getAnswerKey(selectedProblem.problem_id);
+      setAnswerKeyState({
+        unlocked: response.unlocked,
+        loading: false,
+        content: response.unlocked ? response : null,
+        error: "",
+      });
+    } catch (answerKeyError) {
+      setAnswerKeyState((current) => ({
+        ...current,
+        loading: false,
+        error: answerKeyError.message,
+      }));
+    }
+  }
+
   function handleSelectProblem(problemId) {
     setSelectedProblemId(problemId);
     setSubmissionState({ loadingAction: null, result: null, error: "" });
     setHintState({ loadingStage: null, hints: null, error: "" });
+    setAnswerKeyState({ unlocked: false, loading: false, content: null, error: "" });
   }
 
   function handleDifficultyChange(difficulty) {
     setSelectedDifficulty(difficulty);
     setSubmissionState({ loadingAction: null, result: null, error: "" });
     setHintState({ loadingStage: null, hints: null, error: "" });
+    setAnswerKeyState({ unlocked: false, loading: false, content: null, error: "" });
   }
 
   async function handleLogout() {
@@ -651,6 +756,7 @@ export default function App() {
     setCodeByProblem({});
     setSubmissionState({ loadingAction: null, result: null, error: "" });
     setHintState({ loadingStage: null, hints: null, error: "" });
+    setAnswerKeyState({ unlocked: false, loading: false, content: null, error: "" });
     setAuthError("");
   }
 
@@ -706,6 +812,8 @@ export default function App() {
           onResetProgress={handleResetProgress}
           submissionState={submissionState}
           hintState={hintState}
+          answerKeyState={answerKeyState}
+          onViewAnswerKey={handleViewAnswerKey}
           onUnlockHint={handleUnlockHint}
         />
       </section>

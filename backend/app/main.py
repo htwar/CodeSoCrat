@@ -14,6 +14,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine, ensure_schema_evolution, get_db
 from app.models import GeneratedHint, Problem, Submission, TestCase, User, UserProblemProgress
 from app.schemas import (
+    AnswerKeyResponse,
     HintResponse,
     LoginRequest,
     LoginResponse,
@@ -341,6 +342,40 @@ def get_hints(
         context=context,
     )
     return HintResponse.model_validate(payload)
+
+
+@app.get("/answer-key", response_model=AnswerKeyResponse)
+def get_answer_key(
+    problem_id: str = Query(..., min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AnswerKeyResponse:
+    problem = (
+        db.query(Problem)
+        .options(selectinload(Problem.answer_key))
+        .filter(Problem.problem_id == problem_id)
+        .first()
+    )
+    if problem is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
+    if problem.answer_key is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Answer key not available for this problem.")
+
+    progress = progress_service.get_or_create(db, user=user, problem=problem)
+    if not progress.answer_key_unlocked:
+        return AnswerKeyResponse(
+            problem_id=problem.problem_id,
+            unlocked=False,
+            solution_code=None,
+            explanation=None,
+        )
+
+    return AnswerKeyResponse(
+        problem_id=problem.problem_id,
+        unlocked=True,
+        solution_code=problem.answer_key.solution_code,
+        explanation=problem.answer_key.explanation,
+    )
 
 
 @app.post("/author/problems/upload", response_model=ProblemUploadResponse)

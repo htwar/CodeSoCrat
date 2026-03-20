@@ -221,6 +221,10 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(unlocked.json()["conceptual"], "generated-stage-1")
         self.assertIsNone(unlocked.json()["strategic"])
 
+        answer_key = self.client.get("/answer-key", params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(answer_key.status_code, 200)
+        self.assertFalse(answer_key.json()["unlocked"])
+
     def test_run_does_not_unlock_hints_or_increment_attempts(self) -> None:
         self._login("student@codesocrat.dev", "studentpass")
 
@@ -236,6 +240,20 @@ class BackendFlowTests(unittest.TestCase):
         hints = self.client.get("/hints", params={"problem_id": "sum_two_numbers"})
         self.assertEqual(hints.status_code, 403)
         self.assertEqual(hints.json()["detail"], "No hints unlocked yet.")
+
+    def test_answer_key_unlocks_after_three_valid_failed_submits(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+
+        for _ in range(3):
+            response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
+            self.assertEqual(response.status_code, 200)
+
+        answer_key = self.client.get("/answer-key", params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(answer_key.status_code, 200)
+        payload = answer_key.json()
+        self.assertTrue(payload["unlocked"])
+        self.assertIn("def add_numbers", payload["solution_code"])
+        self.assertTrue(payload["explanation"])
 
     def test_syntax_failure_unlocks_only_syntactic_hint(self) -> None:
         self._login("student@codesocrat.dev", "studentpass")

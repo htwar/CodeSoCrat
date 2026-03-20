@@ -128,6 +128,11 @@ export async function getHints(problemId, stage) {
   return request(`/hints?problem_id=${encodedProblemId}${stageQuery}`);
 }
 
+export async function getAnswerKey(problemId) {
+  const encodedProblemId = encodeURIComponent(problemId);
+  return request(`/answer-key?problem_id=${encodedProblemId}`);
+}
+
 export async function uploadProblem(payload) {
   return request("/author/problems/upload", {
     method: "POST",
