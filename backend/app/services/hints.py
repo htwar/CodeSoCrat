@@ -96,13 +96,13 @@ class OllamaHintService:
 
         stage_instructions = {
             1: (
-                "Give a conceptual hint only. Explain the underlying idea or misconception without revealing the algorithm, line-level edits, or the final code."
+                "Give a conceptual hint only. Explain the underlying idea or misconception without revealing the algorithm, specific operators, specific constants, line-level edits, or the final code."
             ),
             2: (
-                "Give a strategic hint only. Describe a plan of attack or debugging approach without writing the exact solution."
+                "Give a strategic hint only. Describe a plan of attack or debugging approach without writing the exact solution, exact condition, or exact return expression."
             ),
             3: (
-                "Give a syntactic hint only. Focus strictly on the reported syntax or definition issue. Do not mention any other bug unless it is directly supported by the reported error details."
+                "Give a syntactic hint only. Focus strictly on the reported syntax or definition issue. Explain what kind of token, operator, delimiter, or function-name fix is needed, but do not provide the exact corrected line or a complete replacement expression."
             ),
         }
 
@@ -133,6 +133,10 @@ class OllamaHintService:
                 "Write at most 2 short bullets.",
                 "Be concrete, concise, and educational.",
                 "Do not reveal the full solution.",
+                "Do not provide a fully corrected code line.",
+                "Do not provide the exact final return expression.",
+                "Do not provide a specific operator-and-constant rule unless the student has explicitly unlocked the answer key.",
+                "Do not name the final operator sequence unless the parser error already explicitly identifies it.",
                 "Do not mention any bug not supported by the evidence.",
                 "",
                 *problem_context,
