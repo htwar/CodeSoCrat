@@ -87,9 +87,3 @@ Caddy will handle HTTPS automatically once the domain resolves correctly.
 - CSRF protection on state-changing routes
 - Docker sandbox with network disabled and resource limits
 - Environment-based secret management
-
-## Repo Notes
-
-- Public setup lives in this file.
-- Developer-only or machine-specific notes should go in local `README(dev).md`, which is ignored by git.
-- Environment templates are provided, but real secret files should never be committed.
