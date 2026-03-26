@@ -53,8 +53,9 @@ function AuthPanel({ onLogin, onRegister, loading, error }) {
 
   return (
     <section className="auth-card">
-      <p className="eyebrow">CodeSoCrat</p>
-      <h1>Practice Python with guided feedback</h1>
+      <h1>CodeSoCrat</h1>
+      <p className="eyebrow">Practice Python with guided feedback</p>
+  
       <p className="lede">
         Log in to keep working, or create a new student account to start fresh.
       </p>
