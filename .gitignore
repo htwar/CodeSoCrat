@@ -3,6 +3,7 @@
 .env.example
 .env.production.example
 .env.local
+README(dev).md
 codesocrat.db
 debug.db
 frontend/node_modules/

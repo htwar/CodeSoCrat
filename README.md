@@ -1,51 +1,45 @@
 # CodeSoCrat
 
-This repository now contains a starter backend and a basic React frontend for the CodeSoCrat application described in the design document, plus a production-ready deployment path with Docker Compose, PostgreSQL, and a reverse proxy.
+CodeSoCrat is a web application for Python coding practice. Students can work through problems, run or submit solutions, receive adaptive hints, and unlock answer keys after repeated valid failed submissions. The app is built with a React frontend, a FastAPI backend, a SQL database, Docker-based code execution, and Ollama-powered hint generation.
 
-## What is implemented
+## Features
 
-- FastAPI application scaffold
-- SQLite database schema managed by SQLAlchemy models
-- Seeded student and author accounts
-- Starter problems loaded on first run
-- Login, registration, session restore, and logout with `HttpOnly` cookie auth
-- Problem listing endpoint
-- Author-only problem upload endpoint with schema validation
-- Submission evaluation pipeline with syntax, definition, runtime, timeout, and incorrect-output classification
-- Docker sandbox execution with no network access and resource limits
-- Hint unlocking and retrieval
+- Student registration and login with secure cookie-based sessions
+- Difficulty-based problem browsing
+- Monaco editor for student code and author JSON uploads
+- Separate `Run` and `Submit` actions
+- Adaptive conceptual, strategic, and syntactic hints
+- Hidden grading test cases with visible sample cases
+- Answer key unlocking after repeated valid failed submissions
+- Author-only problem uploads with schema validation
+- Docker sandbox execution for Python code
+- Production deployment path with PostgreSQL, Caddy, and Docker Compose
 
-## Frontend
+## Tech Stack
 
-- React + Vite frontend
-- Student login flow
-- Problem browser
-- Code editor and submission workspace
-- Visible sample cases in the problem view while grading cases remain hidden
-- Result and hint display
-- Author-only JSON upload panel
+- Frontend: React + Vite + Monaco
+- Backend: FastAPI + SQLAlchemy
+- Database: SQLite for local development, PostgreSQL-ready for production
+- Sandbox: Docker
+- Hint generation: Ollama
+- Reverse proxy / HTTPS: Caddy
 
-## Seed accounts
+## Local Development
 
-- Student: `student@codesocrat.dev` / `studentpass`
-- Author: `author@codesocrat.dev` / `authorpass`
-
-## Run locally
-
-Create env files first:
+1. Create local env files from the templates:
 
 ```bash
 cp .env.example .env
 cp frontend/.env.example frontend/.env
 ```
 
-Start the backend:
+2. Start the backend:
 
 ```bash
 python3 -m uvicorn app.main:app --reload --app-dir backend
 ```
 
-Then start the frontend:
+3. Start the frontend:
 
 ```bash
 cd frontend
@@ -53,18 +47,11 @@ npm install
 npm run dev
 ```
 
-The API will start at `http://127.0.0.1:8000` and the React app will start at `http://127.0.0.1:5173`.
+4. Open the app at `http://127.0.0.1:5173`.
 
-## Production deployment
+## Production Deployment
 
-Production deployment files are included for:
-
-- PostgreSQL
-- FastAPI backend
-- built React frontend
-- Caddy reverse proxy with automatic HTTPS
-
-Files added for production:
+The repository includes a production path with:
 
 - [docker-compose.yml](/Users/htwarreh/Documents/CodeSoCrat/docker-compose.yml)
 - [Caddyfile](/Users/htwarreh/Documents/CodeSoCrat/Caddyfile)
@@ -73,122 +60,36 @@ Files added for production:
 - [frontend/nginx.conf](/Users/htwarreh/Documents/CodeSoCrat/frontend/nginx.conf)
 - [.env.production.example](/Users/htwarreh/Documents/CodeSoCrat/.env.production.example)
 
-### Production steps
+Basic deployment flow:
 
-1. Copy the production env file:
+1. Copy the production template:
 
 ```bash
 cp .env.production.example .env.production
 ```
 
-2. Set a real domain and secure secrets in `.env.production`:
-
-- `CODESOCRAT_DOMAIN`
-- `POSTGRES_PASSWORD`
-- `CODESOCRAT_SECRET_KEY_CURRENT`
-- `CODESOCRAT_CORS_ORIGINS`
-
-3. Point your DNS record to the server IP:
-
-- `A` record for `app.example.com` -> your server IP
-
-4. Make sure ports `80` and `443` are open on the server.
-
+2. Update the production env values for your domain, database, and secrets.
+3. Point your DNS record at the server.
+4. Open ports `80` and `443`.
 5. Start the stack:
 
 ```bash
 docker compose --env-file .env.production up -d --build
 ```
 
-6. Caddy will request and renew HTTPS certificates automatically once the domain resolves publicly.
+Caddy will handle HTTPS automatically once the domain resolves correctly.
 
-### Production architecture
+## Security
 
-- `reverse-proxy`
-  Caddy terminates HTTPS and routes `/api/*` to FastAPI.
-- `frontend`
-  Nginx serves the built React app.
-- `backend`
-  FastAPI runs the application API.
-- `db`
-  PostgreSQL stores application data.
+- Strict schema validation rejects unexpected fields
+- Rate limiting on public endpoints
+- `HttpOnly` cookie sessions
+- CSRF protection on state-changing routes
+- Docker sandbox with network disabled and resource limits
+- Environment-based secret management
 
-### Notes
+## Repo Notes
 
-- The backend is PostgreSQL-ready through `CODESOCRAT_DATABASE_URL`.
-- The backend mounts `/var/run/docker.sock` so it can launch the sandbox container on the host Docker daemon.
-- The backend maps `host.docker.internal` to the host gateway so a locally running Ollama service can still be reached from the container.
-- For production, keep `CODESOCRAT_SESSION_COOKIE_SECURE=true`.
-
-## Environment files
-
-The backend now loads variables from a root `.env` file automatically.
-
-Important values:
-
-- `CODESOCRAT_SECRET_KEY_CURRENT`
-- `CODESOCRAT_SECRET_KEY_PREVIOUS`
-- `CODESOCRAT_SESSION_COOKIE_NAME`
-- `CODESOCRAT_CSRF_COOKIE_NAME`
-- `CODESOCRAT_CSRF_HEADER_NAME`
-- `CODESOCRAT_SESSION_COOKIE_SECURE`
-- `CODESOCRAT_SESSION_COOKIE_SAMESITE`
-- `CODESOCRAT_SESSION_COOKIE_MAX_AGE_SECONDS`
-- `CODESOCRAT_DOCKER_IMAGE`
-- `CODESOCRAT_DOCKER_AUTO_PULL`
-- `CODESOCRAT_DOCKER_PULL_TIMEOUT_SECONDS`
-- `CODESOCRAT_OLLAMA_BASE_URL`
-- `CODESOCRAT_OLLAMA_MODEL`
-- `CODESOCRAT_OLLAMA_HINT_MAX_TOKENS`
-- `CODESOCRAT_OLLAMA_HINT_CODE_PREVIEW_LINES`
-- `CODESOCRAT_RATE_LIMIT_*`
-
-For production, see `.env.production.example` as the main template.
-
-The frontend uses `frontend/.env` for:
-
-- `VITE_API_BASE_URL`
-
-## Security Notes
-
-- The API now rejects unexpected request fields and applies stricter length and format validation to user input.
-- Rate limiting is enforced on public endpoints with IP-based limits and additional user-based limits for authenticated traffic and login attempts.
-- Session signing secrets are environment-driven. Rotate them by setting a new `CODESOCRAT_SECRET_KEY_CURRENT` and moving the prior value into `CODESOCRAT_SECRET_KEY_PREVIOUS`.
-- Authentication now uses an `HttpOnly` session cookie. For production HTTPS deployments, set `CODESOCRAT_SESSION_COOKIE_SECURE=true`.
-- State-changing cookie-authenticated routes now require a matching CSRF cookie and `X-CSRF-Token` header.
-
-## Database schema
-
-The backend creates these tables on startup:
-
-- `users`
-- `problems`
-- `test_cases`
-- `hints`
-- `answer_keys`
-- `submissions`
-- `user_problem_progress`
-
-## PostgreSQL path
-
-The app no longer has to rely on SQLite. To use PostgreSQL locally or in production, set:
-
-```env
-CODESOCRAT_DATABASE_URL=postgresql+psycopg://codesocrat:your-password@db:5432/codesocrat
-```
-
-The included Docker Compose stack already uses PostgreSQL by default.
-
-## Docker sandbox
-
-Submissions are executed with `docker run` using:
-
-- `--network none`
-- `--read-only`
-- `--tmpfs /tmp`
-- memory and CPU limits
-- `--pids-limit`
-- dropped Linux capabilities
-
-Make sure Docker Desktop or the Docker daemon is running before submitting code through the API.
-If the sandbox image is missing locally, the backend now attempts to pull `CODESOCRAT_DOCKER_IMAGE` automatically by default.
+- Public setup lives in this file.
+- Developer-only or machine-specific notes should go in local `README(dev).md`, which is ignored by git.
+- Environment templates are provided, but real secret files should never be committed.
