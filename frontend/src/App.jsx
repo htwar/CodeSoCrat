@@ -50,7 +50,7 @@ const starterUploadTemplate = `{
 const demoSolution = "def add_numbers(a, b):\n    return a + b\n";
 const DIFFICULTIES = ["Easy", "Medium", "Hard"];
 const TIME_LIMITS = {
-  Easy: 1 * 5,
+  Easy: 5 * 60,
   Medium: 10 * 60,
   Hard: 15 * 60,
 };
@@ -537,6 +537,8 @@ function AuthorPanel({
   onEnable,
   onDelete,
 }) {
+  const loadFileInputRef = useRef(null);
+  const uploadFileInputRef = useRef(null);
   const authorEditorOptions = {
     automaticLayout: true,
     fontSize: 14,
@@ -628,14 +630,36 @@ function AuthorPanel({
           Upload a `.json` file or edit the payload directly. Starter problems stay read-only; only your own custom problems can be edited, disabled, or deleted.
         </p>
         <div className="author-toolbar">
-          <label className="file-button">
-            <input type="file" accept="application/json,.json" onChange={onLoadJsonFile} />
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => loadFileInputRef.current?.click()}
+          >
             Load JSON Into Editor
-          </label>
-          <label className="file-button solid">
-            <input type="file" accept="application/json,.json" onChange={onUploadJsonFile} />
+          </button>
+          <input
+            ref={loadFileInputRef}
+            className="sr-only-input"
+            type="file"
+            accept="application/json,.json"
+            onChange={onLoadJsonFile}
+            aria-label="Load a JSON problem file into the editor"
+          />
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => uploadFileInputRef.current?.click()}
+          >
             Upload JSON File
-          </label>
+          </button>
+          <input
+            ref={uploadFileInputRef}
+            className="sr-only-input"
+            type="file"
+            accept="application/json,.json"
+            onChange={onUploadJsonFile}
+            aria-label="Upload a JSON problem file directly"
+          />
           <button type="button" className="secondary-button" onClick={onCreateNew}>
             Reset Draft
           </button>
@@ -662,8 +686,8 @@ function AuthorPanel({
             </button>
           )}
         </div>
-        {authorEditor.message ? <p className="success-text">{authorEditor.message}</p> : null}
-        {authorEditor.error ? <p className="error-text">{authorEditor.error}</p> : null}
+        {authorEditor.message ? <p className="success-text" aria-live="polite">{authorEditor.message}</p> : null}
+        {authorEditor.error ? <p className="error-text" aria-live="assertive">{authorEditor.error}</p> : null}
       </section>
     </section>
   );
