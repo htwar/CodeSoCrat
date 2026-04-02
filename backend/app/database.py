@@ -25,17 +25,37 @@ def get_db():
 
 def ensure_schema_evolution() -> None:
     inspector = inspect(engine)
-    if "submissions" not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if "submissions" not in table_names:
         return
 
-    existing_columns = {column["name"] for column in inspector.get_columns("submissions")}
     statements = []
-    if "execution_type" not in existing_columns:
-        statements.append("ALTER TABLE submissions ADD COLUMN execution_type TEXT DEFAULT 'Submit'")
-    if "error_line" not in existing_columns:
-        statements.append("ALTER TABLE submissions ADD COLUMN error_line INTEGER")
-    if "error_excerpt" not in existing_columns:
-        statements.append("ALTER TABLE submissions ADD COLUMN error_excerpt TEXT")
+    if "submissions" in table_names:
+        submission_columns = {column["name"] for column in inspector.get_columns("submissions")}
+        if "execution_type" not in submission_columns:
+            statements.append("ALTER TABLE submissions ADD COLUMN execution_type TEXT DEFAULT 'Submit'")
+        if "error_line" not in submission_columns:
+            statements.append("ALTER TABLE submissions ADD COLUMN error_line INTEGER")
+        if "error_excerpt" not in submission_columns:
+            statements.append("ALTER TABLE submissions ADD COLUMN error_excerpt TEXT")
+
+    if "users" in table_names:
+        user_columns = {column["name"] for column in inspector.get_columns("users")}
+        if "auth_provider" not in user_columns:
+            statements.append("ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'local'")
+        if "google_sub" not in user_columns:
+            statements.append("ALTER TABLE users ADD COLUMN google_sub TEXT")
+        if "display_name" not in user_columns:
+            statements.append("ALTER TABLE users ADD COLUMN display_name TEXT")
+
+    if "problems" in table_names:
+        problem_columns = {column["name"] for column in inspector.get_columns("problems")}
+        if "is_active" not in problem_columns:
+            statements.append("ALTER TABLE problems ADD COLUMN is_active BOOLEAN DEFAULT 1")
+        if "is_deleted" not in problem_columns:
+            statements.append("ALTER TABLE problems ADD COLUMN is_deleted BOOLEAN DEFAULT 0")
+        if "updated_at" not in problem_columns:
+            statements.append("ALTER TABLE problems ADD COLUMN updated_at DATETIME")
 
     if not statements:
         return
@@ -43,3 +63,9 @@ def ensure_schema_evolution() -> None:
     with engine.begin() as connection:
         for statement in statements:
             connection.execute(text(statement))
+
+        if "problems" in table_names:
+            connection.execute(text("UPDATE problems SET is_active = COALESCE(is_active, 1), is_deleted = COALESCE(is_deleted, 0)"))
+            connection.execute(text("UPDATE problems SET updated_at = COALESCE(updated_at, created_at)"))
+        if "users" in table_names:
+            connection.execute(text("UPDATE users SET auth_provider = COALESCE(auth_provider, 'local')"))
