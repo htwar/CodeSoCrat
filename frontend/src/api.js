@@ -40,6 +40,7 @@ function formatValidationError(item) {
 async function request(path, options = {}) {
   const { headers: customHeaders = {}, ...restOptions } = options;
   const method = (restOptions.method || "GET").toUpperCase();
+  const isFormData = typeof FormData !== "undefined" && restOptions.body instanceof FormData;
   const csrfHeaders = {};
   if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
     const csrfToken = getCookie(CSRF_COOKIE_NAME);
@@ -51,7 +52,7 @@ async function request(path, options = {}) {
     ...restOptions,
     credentials: "include",
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...csrfHeaders,
       ...customHeaders,
     },
@@ -103,9 +104,32 @@ export async function logout() {
   });
 }
 
+export async function getGoogleConfig() {
+  return request("/auth/google/config");
+}
+
+export async function googleAuth(credential) {
+  return request("/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ credential }),
+  });
+}
+
 export async function getProblems(difficulty) {
   const difficultyQuery = difficulty ? `?difficulty=${encodeURIComponent(difficulty)}` : "";
   return request(`/problems${difficultyQuery}`);
+}
+
+export async function getAuthorProblems(source = "all", includeDeleted = false) {
+  const query = new URLSearchParams({
+    source,
+    include_deleted: String(includeDeleted),
+  });
+  return request(`/author/problems?${query.toString()}`);
+}
+
+export async function getAuthorProblem(problemId) {
+  return request(`/author/problems/${encodeURIComponent(problemId)}`);
 }
 
 export async function runCode(payload) {
@@ -137,6 +161,40 @@ export async function uploadProblem(payload) {
   return request("/author/problems/upload", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function uploadProblemFile(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return request("/author/problems/upload-file", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export async function updateProblem(problemId, payload) {
+  return request(`/author/problems/${encodeURIComponent(problemId)}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function disableProblem(problemId) {
+  return request(`/author/problems/${encodeURIComponent(problemId)}/disable`, {
+    method: "POST",
+  });
+}
+
+export async function enableProblem(problemId) {
+  return request(`/author/problems/${encodeURIComponent(problemId)}/enable`, {
+    method: "POST",
+  });
+}
+
+export async function deleteProblem(problemId) {
+  return request(`/author/problems/${encodeURIComponent(problemId)}`, {
+    method: "DELETE",
   });
 }
 
