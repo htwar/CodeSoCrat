@@ -244,12 +244,19 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(hints.status_code, 403)
         self.assertEqual(hints.json()["detail"], "No hints unlocked yet.")
 
-    def test_answer_key_unlocks_after_three_valid_failed_submits(self) -> None:
+    def test_answer_key_unlocks_after_four_valid_failed_submits(self) -> None:
         self._login("student@codesocrat.dev", "studentpass")
 
         for _ in range(3):
             response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
             self.assertEqual(response.status_code, 200)
+
+        still_locked = self.client.get("/answer-key", params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(still_locked.status_code, 200)
+        self.assertFalse(still_locked.json()["unlocked"])
+
+        response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
+        self.assertEqual(response.status_code, 200)
 
         answer_key = self.client.get("/answer-key", params={"problem_id": "sum_two_numbers"})
         self.assertEqual(answer_key.status_code, 200)

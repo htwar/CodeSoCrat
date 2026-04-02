@@ -53,9 +53,8 @@ function AuthPanel({ onLogin, onRegister, loading, error }) {
 
   return (
     <section className="auth-card">
-      <h1>CodeSoCrat</h1>
-      <p className="eyebrow">Practice Python with guided feedback</p>
-  
+      <h1 className="eyebrow">CodeSoCrat</h1>
+      <p>Practice Python with guided feedback</p>
       <p className="lede">
         Log in to keep working, or create a new student account to start fresh.
       </p>
@@ -376,7 +375,7 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
         <p>
           {isUnlocked
             ? "You have earned the answer key for this problem. Reveal it when you are ready to compare your work."
-            : "Locked until you reach three valid failed Submit attempts on this problem."}
+            : "Locked until you reach four valid failed Submit attempts on this problem."}
         </p>
       )}
       {answerKeyState.error ? <p className="error-text">{answerKeyState.error}</p> : null}

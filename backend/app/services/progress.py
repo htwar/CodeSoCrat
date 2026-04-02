@@ -42,7 +42,7 @@ class ProgressService:
 
         if valid_attempt:
             progress.valid_failed_attempts += 1
-        if progress.valid_failed_attempts >= 3:
+        if progress.valid_failed_attempts >= 4:
             progress.answer_key_unlocked = True
 
         progress.unlocked_stage = max(self.get_unlocked_stages(progress), default=0)
