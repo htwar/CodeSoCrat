@@ -1,4 +1,5 @@
 :root {
+  /* Shared design tokens for the warm paper-and-ink visual language. */
   color-scheme: light;
   --bg: #f3efe5;
   --panel: rgba(255, 251, 245, 0.88);
@@ -8,6 +9,7 @@
   --line: rgba(30, 29, 26, 0.14);
   --accent: #be4f2c;
   --accent-dark: #8f3518;
+  --hover-surface: linear-gradient(135deg, rgba(190, 79, 44, 0.12), rgba(255, 255, 255, 0.92));
   --success: #206047;
   --danger: #9f2d20;
   --shadow: 0 24px 80px rgba(40, 28, 10, 0.14);
@@ -18,6 +20,7 @@
   box-sizing: border-box;
 }
 
+/* Global page shell and typography primitives. */
 body {
   margin: 0;
   min-height: 100vh;
@@ -78,6 +81,7 @@ code,
   padding: 36px;
 }
 
+/* Authentication view styles. */
 .eyebrow {
   margin: 0 0 10px;
   font-size: 0.8rem;
@@ -213,7 +217,8 @@ button:disabled {
 .secondary-button:hover,
 .ghost-button:hover,
 .danger-button:hover {
-  background: rgba(255, 255, 255, 0.65);
+  background: var(--hover-surface);
+  border-color: rgba(190, 79, 44, 0.28);
 }
 
 .account-hints {
@@ -255,6 +260,7 @@ button:disabled {
   color: var(--danger);
 }
 
+/* Main application layout and shared panel patterns. */
 
 .topbar {
   display: flex;
@@ -321,7 +327,7 @@ button:disabled {
 }
 
 .difficulty-chip:hover {
-  background: rgba(255, 255, 255, 0.84);
+  background: var(--hover-surface);
   color: var(--ink);
 }
 
@@ -342,7 +348,8 @@ button:disabled {
 }
 
 .problem-item:hover {
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--hover-surface);
+  border-color: rgba(190, 79, 44, 0.28);
 }
 
 .problem-item.active {
@@ -386,12 +393,18 @@ button:disabled {
   color: var(--muted);
 }
 
+.source-pill:hover {
+  background: var(--hover-surface);
+  border-color: rgba(190, 79, 44, 0.28);
+}
+
 .workspace-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.9fr);
   gap: 20px;
 }
 
+/* Problem workspace, timed mode, and editor surfaces. */
 .prompt-copy,
 .meta-copy {
   color: var(--muted);
@@ -549,6 +562,7 @@ button:disabled {
   background: linear-gradient(135deg, rgba(190, 79, 44, 0.08), rgba(255, 250, 241, 0.95));
 }
 
+/* Author dashboard controls and cards. */
 .error-text {
   color: var(--danger);
   margin-top: 14px;
@@ -592,6 +606,12 @@ button:disabled {
   border-radius: 18px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.62);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.author-problem-card:hover {
+  background: var(--hover-surface);
+  border-color: rgba(190, 79, 44, 0.28);
 }
 
 .author-problem-copy {

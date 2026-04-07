@@ -25,6 +25,8 @@ class HintContext:
 
 class OllamaHintService:
     def generate_hint(self, *, stage: int, context: HintContext) -> str:
+        # Hint generation is stage-aware so the model reveals only the level of
+        # help the student has earned through failed submissions.
         prompt = self._build_prompt(stage=stage, context=context)
         payload = json.dumps(
             {
@@ -68,6 +70,8 @@ class OllamaHintService:
         unlocked_stages: set[int],
         latest_submission: Optional[Submission],
     ) -> dict[int, str]:
+        # Hints are tied to a specific submission so refreshed pages reuse the
+        # same answer instead of generating slightly different wording.
         if latest_submission is None:
             return {}
         return {
@@ -77,6 +81,8 @@ class OllamaHintService:
         }
 
     def build_hint_response(self, *, unlocked_stages: set[int], generated_hints: dict[int, str], problem: Problem) -> dict[str, object]:
+        # The frontend expects one payload with all unlocked stages so it can
+        # render the hint panel without extra shape-mapping.
         return {
             "problem_id": problem.problem_id,
             "unlocked_stage": max(unlocked_stages, default=0),
@@ -87,6 +93,8 @@ class OllamaHintService:
         }
 
     def _build_prompt(self, *, stage: int, context: HintContext) -> str:
+        # Assemble the prompt sent to Ollama, balancing problem context with
+        # strict anti-spoiler instructions for each hint stage.
         submission = context.latest_submission
         submission_code = self._build_submission_excerpt(submission.code if submission is not None else "")
         failure_category = submission.failure_category if submission is not None else context.progress.last_failure_category
@@ -148,6 +156,8 @@ class OllamaHintService:
         )
 
     def _build_submission_excerpt(self, code: str) -> str:
+        # Limit the amount of student code sent to the model so prompts stay
+        # short and focused.
         if not code:
             return "No submission available."
         lines = code.splitlines()
@@ -159,6 +169,7 @@ class OllamaHintService:
         return "\n".join([*head, "...", *tail])
 
     def _condense_text(self, text: str, *, limit: int) -> str:
+        # Collapse long prompt text into a short single-line summary for hints.
         collapsed = " ".join(text.split())
         if len(collapsed) <= limit:
             return collapsed
@@ -171,6 +182,8 @@ class OllamaHintService:
         available_hints: dict[int, str],
         context: HintContext,
     ) -> Optional[int]:
+        # Prefer the next missing hint, but jump to syntax guidance first when
+        # the failure category shows the student is blocked by parsing issues.
         missing_stages = [stage for stage in sorted(unlocked_stages) if stage not in available_hints]
         if not missing_stages:
             return min(unlocked_stages) if unlocked_stages else None
@@ -185,6 +198,8 @@ class OllamaHintService:
 
 
 def cache_generated_hint(*, db, user: User, problem: Problem, submission: Submission, stage: int, content: str) -> GeneratedHint:
+    # Reuse an existing row when the same submission already produced a hint for
+    # that stage, which keeps the cache idempotent.
     cached = (
         db.query(GeneratedHint)
         .filter(

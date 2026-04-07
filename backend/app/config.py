@@ -5,7 +5,11 @@ from pathlib import Path
 from pydantic import BaseModel
 
 
+# Load a project-local .env file for development convenience without requiring
+# a separate dependency.
 def load_env_file() -> None:
+    # Read simple KEY=VALUE pairs from the repo-local .env file into the
+    # process environment before settings are instantiated.
     project_root = Path(__file__).resolve().parents[2]
     env_path = project_root / ".env"
     if not env_path.exists():
@@ -26,6 +30,8 @@ load_env_file()
 
 
 class Settings(BaseModel):
+    # Centralized application settings used across auth, database access,
+    # frontend CORS, code execution, and optional Google login.
     app_name: str = "CodeSoCrat API"
     database_url: str = os.getenv("CODESOCRAT_DATABASE_URL", "sqlite:///./codesocrat.db")
     secret_key_current: str = os.getenv("CODESOCRAT_SECRET_KEY_CURRENT", os.getenv("CODESOCRAT_SECRET_KEY", "")) or secrets.token_urlsafe(48)

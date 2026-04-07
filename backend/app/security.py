@@ -8,12 +8,14 @@ EMAIL_PATTERN = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}$")
 
 
 def reject_control_characters(value: str, field_name: str) -> str:
+    # Keep invisible control characters out of stored content and logs.
     if CONTROL_CHARACTERS_PATTERN.search(value):
         raise ValueError(f"{field_name} contains unsupported control characters.")
     return value
 
 
 def normalize_text(value: str, field_name: str, *, max_length: int, allow_newlines: bool = False) -> str:
+    # Shared validation for single-line user input fields.
     normalized = value.strip()
     if not normalized:
         raise ValueError(f"{field_name} must not be empty.")
@@ -26,6 +28,7 @@ def normalize_text(value: str, field_name: str, *, max_length: int, allow_newlin
 
 
 def normalize_multiline_text(value: str, field_name: str, *, max_length: int) -> str:
+    # Multiline fields still get trimming and control-character protection.
     normalized = value.strip()
     if not normalized:
         raise ValueError(f"{field_name} must not be empty.")
@@ -36,6 +39,8 @@ def normalize_multiline_text(value: str, field_name: str, *, max_length: int) ->
 
 
 def validate_email(value: str) -> str:
+    # Normalize emails once so login, registration, and lookup all compare the
+    # same canonical lowercase form.
     normalized = normalize_text(value, "email", max_length=255)
     lowered = normalized.lower()
     if not EMAIL_PATTERN.fullmatch(lowered):

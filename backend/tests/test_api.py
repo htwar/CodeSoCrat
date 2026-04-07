@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 class BackendFlowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        # Tests run against an isolated SQLite database so they never touch a
+        # developer's local app data.
         cls.temp_dir = TemporaryDirectory()
         db_path = Path(cls.temp_dir.name) / "test.db"
         os.environ["CODESOCRAT_DATABASE_URL"] = f"sqlite:///{db_path}"
@@ -44,6 +46,8 @@ class BackendFlowTests(unittest.TestCase):
         cls.rate_limiter = rate_limiter
 
         class FakeExecutor:
+            # Keep the API tests deterministic by replacing real Docker
+            # execution with a few recognizable code-pattern outcomes.
             def run(self, *, code: str, function_name: str, test_cases):
                 if "return a - b" in code:
                     return EvaluationResult(
@@ -82,6 +86,7 @@ class BackendFlowTests(unittest.TestCase):
                 )
 
         class FakeHintService:
+            # Replace model-generated hints with a predictable test string.
             def generate_hint(self, *, stage, context):
                 return f"generated-stage-{stage}"
 
@@ -90,6 +95,7 @@ class BackendFlowTests(unittest.TestCase):
         cls.client = TestClient(app)
 
     def setUp(self) -> None:
+        # Re-seed before each test so cases stay independent.
         self.rate_limiter._buckets.clear()
         self.client.cookies.clear()
         self.Base.metadata.drop_all(bind=self.engine)
@@ -103,10 +109,13 @@ class BackendFlowTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
+        # Remove the temporary database directory once the suite finishes.
         cls.temp_dir.cleanup()
         os.environ.pop("CODESOCRAT_DATABASE_URL", None)
 
     def _login(self, email: str, password: str) -> dict:
+        # Helper methods keep the tests focused on behavior instead of request
+        # plumbing.
         response = self.client.post("/auth/login", json={"email": email, "password": password})
         self.assertEqual(response.status_code, 200)
         self.assertIn("codesocrat_session", response.cookies)
@@ -114,11 +123,13 @@ class BackendFlowTests(unittest.TestCase):
         return response.json()
 
     def _csrf_headers(self) -> dict[str, str]:
+        # Mirror the frontend's CSRF header format for protected routes.
         csrf = self.client.cookies.get("codesocrat_csrf")
         self.assertTrue(csrf)
         return {"X-CSRF-Token": csrf}
 
     def _submit(self, problem_id: str, code: str):
+        # Convenience wrapper for the full submission endpoint.
         return self.client.post(
             "/submit",
             headers=self._csrf_headers(),
@@ -130,6 +141,7 @@ class BackendFlowTests(unittest.TestCase):
         )
 
     def _run(self, problem_id: str, code: str):
+        # Convenience wrapper for practice-mode execution.
         return self.client.post(
             "/run",
             headers=self._csrf_headers(),
@@ -141,6 +153,8 @@ class BackendFlowTests(unittest.TestCase):
         )
 
     def test_register_creates_student_account(self) -> None:
+        # Local self-registration should always create the lower-privilege
+        # Student role and establish a cookie session immediately.
         response = self.client.post(
             "/auth/register",
             json={
@@ -164,6 +178,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200)
 
     def test_register_rejects_duplicate_email(self) -> None:
+        # Duplicate identity creation should be blocked before a second account
+        # can be created with the same email.
         response = self.client.post(
             "/auth/register",
             json={
@@ -175,12 +191,16 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
 
     def test_session_endpoint_uses_cookie_auth(self) -> None:
+        # Once logged in, the session endpoint should be able to rebuild the
+        # user identity from the signed cookie alone.
         self._login("student@codesocrat.dev", "studentpass")
         response = self.client.get("/auth/session")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["email"], "student@codesocrat.dev")
 
     def test_logout_clears_cookie_session(self) -> None:
+        # Logging out should invalidate the current session so subsequent
+        # session lookups return unauthorized.
         self._login("student@codesocrat.dev", "studentpass")
         logout = self.client.post("/auth/logout", headers=self._csrf_headers())
         self.assertEqual(logout.status_code, 204)
@@ -189,6 +209,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(after_logout.status_code, 401)
 
     def test_state_change_without_csrf_is_rejected(self) -> None:
+        # Authenticated users still need a matching CSRF token for protected
+        # state-changing operations.
         self._login("student@codesocrat.dev", "studentpass")
         response = self.client.post(
             "/submit",
@@ -202,6 +224,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"], "CSRF validation failed.")
 
     def test_student_submission_unlocks_hint(self) -> None:
+        # A valid failed submit should create durable progress and unlock the
+        # first hint stage, while hidden grading tests stay hidden.
         self._login("student@codesocrat.dev", "studentpass")
 
         problems = self.client.get("/problems")
@@ -234,6 +258,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertFalse(answer_key.json()["unlocked"])
 
     def test_run_does_not_unlock_hints_or_increment_attempts(self) -> None:
+        # Practice-mode runs should provide feedback without changing long-term
+        # progress or unlocking hints.
         self._login("student@codesocrat.dev", "studentpass")
 
         response = self._run("sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
@@ -250,6 +276,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(hints.json()["detail"], "No hints unlocked yet.")
 
     def test_answer_key_unlocks_after_three_valid_failed_submits(self) -> None:
+        # Repeated valid failed submits should escalate support gradually until
+        # the answer key becomes available.
         self._login("student@codesocrat.dev", "studentpass")
 
         for _ in range(3):
@@ -264,6 +292,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertTrue(payload["explanation"])
 
     def test_syntax_failure_unlocks_only_syntactic_hint(self) -> None:
+        # Syntax mistakes should route students directly toward syntactic help
+        # instead of unlocking conceptual and strategic hints first.
         self._login("student@codesocrat.dev", "studentpass")
 
         response = self._submit("sum_two_numbers", "def add_numbers(a, b)\n    return a + b\n")
@@ -286,6 +316,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(unlocked.json()["syntactic"], "generated-stage-3")
 
     def test_syntax_failure_prioritizes_syntactic_hint_even_when_all_stages_are_unlocked(self) -> None:
+        # Even after broader hint access exists, a fresh syntax error should
+        # still highlight the syntactic hint as the most relevant next step.
         self._login("student@codesocrat.dev", "studentpass")
 
         for _ in range(3):
@@ -301,6 +333,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(hints.json()["highlight_stage"], 3)
 
     def test_evaluation_captures_syntax_error_context(self) -> None:
+        # This doubles as a route-independent check that evaluation exposes the
+        # metadata the hinting/UI layers rely on.
         from app.services.evaluation import EvaluationService
 
         service = EvaluationService(executor=None)
@@ -314,6 +348,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(result.error_excerpt, "    return a +")
 
     def test_student_submission_passes(self) -> None:
+        # Happy-path submit should return a clean passing payload without any
+        # failure category attached.
         self._login("student@codesocrat.dev", "studentpass")
 
         response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a + b\n")
@@ -324,6 +360,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertIsNone(payload["failure_category"])
 
     def test_is_even_problem_rejects_weak_false_positive_solution(self) -> None:
+        # Hidden tests should catch simplistic solutions that only work for one
+        # visible sample-like case.
         self._login("student@codesocrat.dev", "studentpass")
 
         response = self._submit("is_even_number", "def is_even(n):\n    return n - 2 == 0\n")
@@ -333,6 +371,8 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(payload["failure_category"], "IncorrectOutput")
 
     def test_author_uploads_problem(self) -> None:
+        # Authors can create custom problems directly from structured JSON in
+        # the dashboard editor flow.
         self._login("author@codesocrat.dev", "authorpass")
 
         response = self.client.post(

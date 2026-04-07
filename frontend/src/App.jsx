@@ -68,16 +68,20 @@ const HINT_TYPE_LABELS = {
 const WORKSPACE_STORAGE_PREFIX = "codesocrat_workspace_v1";
 
 function formatSeconds(totalSeconds) {
+  // Convert raw countdown seconds into an MM:SS string for the timer UI.
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function getWorkspaceStorageKey(userId) {
+  // Keep each signed-in user's saved editor/timer state isolated in localStorage.
   return `${WORKSPACE_STORAGE_PREFIX}:${userId}`;
 }
 
 function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, loading, error }) {
+  // Authentication screen shared by local login, registration, and optional
+  // Google sign-in.
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("student@codesocrat.dev");
   const [password, setPassword] = useState("studentpass");
@@ -104,6 +108,7 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
   }, [googleConfig, mode, onGoogleCredential]);
 
   function handleSubmit(event) {
+    // Submit either login or registration based on the active auth tab.
     event.preventDefault();
     if (mode === "register") {
       onRegister({ email, password, confirm_password: confirmPassword });
@@ -197,6 +202,7 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
 }
 
 function ProblemList({ problems, selectedDifficulty, selectedProblemId, onDifficultyChange, onSelect }) {
+  // Left-hand catalog used to switch between available coding problems.
   return (
     <aside className="panel problem-list">
       <div className="panel-header">
@@ -255,6 +261,8 @@ function SubmissionPanel({
   onViewAnswerKey,
   onUnlockHint,
 }) {
+  // Main learner workspace: prompt, timer, code editor, run/submit actions,
+  // and the latest result state.
   const editorOptions = {
     automaticLayout: true,
     fontSize: 15,
@@ -447,6 +455,7 @@ function SubmissionPanel({
 }
 
 function HintCard({ title, stage, hintState, onUnlockHint }) {
+  // Reusable card for one hint tier, including unlock/reveal behavior.
   const hints = hintState.hints || {};
   const stageKey = stage === 1 ? "conceptual" : stage === 2 ? "strategic" : "syntactic";
   const content = hints[stageKey];
@@ -475,6 +484,7 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
 }
 
 function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
+  // Final help panel that reveals the stored solution only after unlock.
   const isUnlocked = answerKeyState.unlocked;
   const hasContent = Boolean(answerKeyState.content);
 
@@ -537,6 +547,8 @@ function AuthorPanel({
   onEnable,
   onDelete,
 }) {
+  // Author-only dashboard for browsing starter/custom problems and editing
+  // custom JSON payloads.
   const loadFileInputRef = useRef(null);
   const uploadFileInputRef = useRef(null);
   const authorEditorOptions = {
@@ -694,6 +706,7 @@ function AuthorPanel({
 }
 
 function loadGoogleScriptOnce() {
+  // Inject Google Identity Services once, then reuse the loaded script.
   return new Promise((resolve, reject) => {
     if (window.google?.accounts?.id) {
       resolve();
@@ -719,6 +732,8 @@ function loadGoogleScriptOnce() {
 }
 
 export default function App() {
+  // Top-level coordinator for auth, problem browsing, timed mode, hints,
+  // author tools, and persisted workspace state.
   const [session, setSession] = useState(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
@@ -745,6 +760,8 @@ export default function App() {
   const sessionRef = useRef(session);
   const codeByProblemRef = useRef(codeByProblem);
 
+  // Keep refs aligned with the latest session and code so timer-triggered
+  // submissions always use the newest in-memory values.
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
@@ -753,6 +770,8 @@ export default function App() {
     codeByProblemRef.current = codeByProblem;
   }, [codeByProblem]);
 
+  // Restore the saved workspace for this user after refresh, including draft
+  // code and any timed challenge that was already in progress.
   useEffect(() => {
     if (!session?.user_id || typeof window === "undefined") {
       return;
@@ -799,6 +818,8 @@ export default function App() {
     }
   }, [session?.user_id]);
 
+  // Persist draft code and timer state per signed-in user so a page reload does
+  // not wipe out work in progress.
   useEffect(() => {
     if (!session?.user_id || typeof window === "undefined") {
       return;
@@ -811,6 +832,8 @@ export default function App() {
     window.localStorage.setItem(getWorkspaceStorageKey(session.user_id), payload);
   }, [session?.user_id, codeByProblem, timedChallengeByProblem]);
 
+  // Load Google auth configuration once so the login screen knows whether the
+  // Google sign-in button should be rendered.
   useEffect(() => {
     let isActive = true;
 
@@ -837,6 +860,8 @@ export default function App() {
     };
   }, []);
 
+  // Restore an existing cookie session before showing either the auth screen or
+  // the workspace.
   useEffect(() => {
     let isActive = true;
 
@@ -863,6 +888,7 @@ export default function App() {
     };
   }, []);
 
+  // Refresh the visible problem list whenever the user changes difficulty.
   useEffect(() => {
     if (!session) {
       return;
@@ -907,6 +933,8 @@ export default function App() {
     };
   }, [session, selectedDifficulty]);
 
+  // Author users get a management dashboard alongside the student workspace,
+  // so their problem list is loaded separately.
   useEffect(() => {
     if (!session || session.role !== "Author") {
       return;
@@ -953,6 +981,8 @@ export default function App() {
     refreshAnswerKeyState(selectedProblem.problem_id);
   }, [selectedProblemId, session]);
 
+  // Drive the active countdown timers and mark any timer that reaches zero so
+  // it can auto-submit on the next effect pass.
   useEffect(() => {
     const hasRunningTimer = Object.values(timedChallengeByProblem).some((challenge) => challenge.status === "running");
     if (!hasRunningTimer) {
@@ -996,6 +1026,7 @@ export default function App() {
     };
   }, [timedChallengeByProblem]);
 
+  // Auto-submit any timed problem whose countdown has just expired.
   useEffect(() => {
     const expiringProblemIds = Object.entries(timedChallengeByProblem)
       .filter(([, challenge]) => challenge.status === "expiring")
@@ -1011,6 +1042,7 @@ export default function App() {
   }, [timedChallengeByProblem]);
 
   function updateCode(nextCode) {
+    // Store editor changes under the currently selected problem id.
     if (!selectedProblem) {
       return;
     }
@@ -1020,6 +1052,8 @@ export default function App() {
     }));
   }
 
+  // Build the default timer state for a problem using its difficulty-specific
+  // time limit.
   function buildTimedChallenge(problem, overrides = {}) {
     const limitSeconds = TIME_LIMITS[problem.difficulty] || TIME_LIMITS.Easy;
     return {
@@ -1035,6 +1069,7 @@ export default function App() {
   }
 
   function resetAuthorEditor(nextJson = starterUploadTemplate) {
+    // Reset the author JSON workspace back to "new upload" mode.
     setAuthorEditor({
       mode: "create",
       problemId: "",
@@ -1046,6 +1081,8 @@ export default function App() {
   }
 
   async function refreshProblemCollections() {
+    // Refresh both the learner list and, for authors, the dashboard list after
+    // uploads, edits, enables, disables, or deletes.
     const response = await getProblems(selectedDifficulty);
     setProblems(response.problems);
     if (session?.role === "Author") {
@@ -1055,6 +1092,7 @@ export default function App() {
   }
 
   function setTimedChallenge(problemId, updater) {
+    // Update one problem's timer state without overwriting timers for others.
     setTimedChallengeByProblem((current) => {
       const currentChallenge = current[problemId];
       const nextChallenge = typeof updater === "function" ? updater(currentChallenge) : updater;
@@ -1066,6 +1104,7 @@ export default function App() {
   }
 
   async function handleLogin(credentials) {
+    // Submit the login form and store the returned session payload.
     setAuthLoading(true);
     setAuthError("");
     try {
@@ -1079,6 +1118,7 @@ export default function App() {
   }
 
   async function handleRegister(credentials) {
+    // Submit the registration form and sign the new user in.
     setAuthLoading(true);
     setAuthError("");
     try {
@@ -1092,6 +1132,7 @@ export default function App() {
   }
 
   async function handleGoogleCredential(credential) {
+    // Exchange the Google credential token for the app's own session cookie.
     setAuthLoading(true);
     setAuthError("");
     try {
@@ -1105,6 +1146,7 @@ export default function App() {
   }
 
   async function refreshHintState(problemId) {
+    // Rebuild the full hint panel state for the selected problem.
     try {
       const response = await getHints(problemId);
       setHintState({ loadingStage: null, hints: response, error: "" });
@@ -1130,6 +1172,7 @@ export default function App() {
   }
 
   async function refreshAnswerKeyState(problemId) {
+    // Re-check whether the answer key is unlocked and cache it if visible.
     try {
       const response = await getAnswerKey(problemId);
       setAnswerKeyState({
@@ -1143,6 +1186,8 @@ export default function App() {
     }
   }
 
+  // Route all run, submit, and auto-submit paths through the same helper so
+  // evaluation behavior stays consistent.
   async function executeCode(action, options = {}) {
     const { forcedProblemId = null, timedMode = false, autoTriggered = false } = options;
     const activeSession = sessionRef.current;
@@ -1209,6 +1254,7 @@ export default function App() {
   }
 
   async function autoSubmitTimedChallenge(problemId) {
+    // Submit whatever code is currently saved when a timer expires.
     await executeCode("Submit", {
       forcedProblemId: problemId,
       timedMode: true,
@@ -1217,6 +1263,7 @@ export default function App() {
   }
 
   async function handleUnlockHint(stage) {
+    // Reveal one unlocked hint stage on demand.
     if (!selectedProblem || !session) {
       return;
     }
@@ -1231,6 +1278,7 @@ export default function App() {
   }
 
   async function handleResetProgress() {
+    // Clear one problem back to its starter state for the current user.
     if (!selectedProblem || !session) {
       return;
     }
@@ -1259,6 +1307,7 @@ export default function App() {
   }
 
   function handleEnableTimedMode() {
+    // Prepare the timer UI without starting the countdown yet.
     if (!selectedProblem) {
       return;
     }
@@ -1270,6 +1319,7 @@ export default function App() {
   }
 
   function handleDisableTimedMode() {
+    // Exit timed mode and restore the problem's idle timer state.
     if (!selectedProblem) {
       return;
     }
@@ -1277,6 +1327,7 @@ export default function App() {
   }
 
   function handleStartTimedMode() {
+    // Start the countdown clock for the selected problem's difficulty tier.
     if (!selectedProblem) {
       return;
     }
@@ -1294,6 +1345,7 @@ export default function App() {
   }
 
   async function handleViewAnswerKey() {
+    // Load the answer key body once the learner chooses to reveal it.
     if (!selectedProblem || !session) {
       return;
     }
@@ -1307,6 +1359,7 @@ export default function App() {
   }
 
   async function handleLoadAuthorProblem(problemId) {
+    // Pull an author-owned custom problem into the JSON editor for editing.
     setAuthorEditor((current) => ({ ...current, loading: true, message: "", error: "" }));
     try {
       const payload = await getAuthorProblem(problemId);
@@ -1324,6 +1377,7 @@ export default function App() {
   }
 
   function handleAuthorFileLoad(event) {
+    // Read a local JSON file into the editor without uploading it yet.
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -1342,6 +1396,7 @@ export default function App() {
   }
 
   async function handleAuthorFileUpload(event) {
+    // Upload a chosen JSON file directly to the backend author endpoint.
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) {
@@ -1366,6 +1421,7 @@ export default function App() {
   }
 
   async function handleAuthorUpload() {
+    // Parse the JSON editor contents and create a new custom problem.
     setAuthorEditor((current) => ({ ...current, loading: true, message: "", error: "" }));
     try {
       const payload = JSON.parse(authorEditor.jsonText);
@@ -1385,6 +1441,7 @@ export default function App() {
   }
 
   async function handleAuthorSave() {
+    // Save edits made to an existing custom problem draft.
     setAuthorEditor((current) => ({ ...current, loading: true, message: "", error: "" }));
     try {
       const payload = JSON.parse(authorEditor.jsonText);
@@ -1397,6 +1454,7 @@ export default function App() {
   }
 
   async function handleAuthorToggle(problemId, action) {
+    // Flip a custom problem between enabled and disabled states.
     try {
       if (action === "disable") {
         await disableProblem(problemId);
@@ -1410,6 +1468,7 @@ export default function App() {
   }
 
   async function handleAuthorDelete(problemId) {
+    // Soft-delete a custom problem from the author dashboard.
     try {
       await deleteProblem(problemId);
       await refreshProblemCollections();
@@ -1422,6 +1481,7 @@ export default function App() {
   }
 
   async function handleLogout() {
+    // Clear backend cookies if possible, then reset all client-side state.
     try {
       await logout();
     } catch (_error) {
