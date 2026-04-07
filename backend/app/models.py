@@ -9,6 +9,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
+# SQLAlchemy models capture the core teaching workflow: users attempt problems,
+# problems own hints and answer keys, and authors may create custom content.
 class User(Base):
     __tablename__ = "users"
 

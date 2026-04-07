@@ -12,6 +12,7 @@ from app.schemas import ProblemUploadPayload
 
 
 def seed_default_users(db: Session) -> None:
+    # Keep predictable demo accounts available for local development and demos.
     defaults = [
         ("student@codesocrat.dev", "studentpass", "Student", "Student Demo"),
         ("author@codesocrat.dev", "authorpass", "Author", "Author Demo"),
@@ -35,6 +36,8 @@ def seed_default_users(db: Session) -> None:
 
 
 def seed_starter_problems(db: Session) -> None:
+    # Re-apply the starter catalog on boot so bundled content stays in sync with
+    # the JSON source file without duplicating rows.
     starter_items = json.loads(settings.starter_problems_path.read_text())
     for item in starter_items:
         payload = ProblemUploadPayload.model_validate(item)
@@ -90,6 +93,7 @@ def seed_starter_problems(db: Session) -> None:
 
 
 def persist_problem(db: Session, payload: ProblemUploadPayload, source: str, author_id: Optional[int]) -> Problem:
+    # Shared helper for starter seeding and author-created problems.
     problem = Problem(
         problem_id=payload.problem_id,
         title=payload.title,
@@ -138,6 +142,8 @@ def persist_problem(db: Session, payload: ProblemUploadPayload, source: str, aut
 
 
 def replace_problem_contents(db: Session, problem: Problem, payload: ProblemUploadPayload) -> Problem:
+    # Replace related rows instead of mutating them in place so the stored test
+    # data always mirrors the uploaded JSON payload exactly.
     problem.title = payload.title
     problem.prompt = payload.prompt
     problem.difficulty = payload.difficulty

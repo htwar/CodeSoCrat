@@ -1,0 +1,380 @@
+\section{Software Testing}
+
+\subsection{Software Testing Plan Template}
+The following test plans are adapted from the provided template and rewritten for CodeSoCrat. The plans cover the testing levels that match the implemented project: unit, integration, system, acceptance, and security testing. Because several backend helper methods follow the same control pattern, one representative unit test case is documented for each function family, and the remaining similar methods are tested using the same template.
+
+\subsection{Unit Testing}
+\textbf{Test Plan Identifier:}
+UT-CodeSoCrat-01
+
+\textbf{Introduction:}
+Unit testing focuses on evaluating individual CodeSoCrat components in isolation before they are exercised through HTTP routes or the browser. The primary units tested are the evaluation service, progress service, and problem-persistence helpers because these units control grading, hint unlocking, answer-key access, and author problem creation.
+
+\textbf{Test item:}
+The specific items tested are \texttt{EvaluationService.evaluate()}, \texttt{ProgressService.apply\_submission\_outcome()}, \texttt{ProgressService.get\_unlocked\_stages()}, and the persistence helpers \texttt{persist\_problem()} and \texttt{replace\_problem\_contents()}.
+
+\textbf{Features to test/not to test:}
+In Scope:
+\begin{itemize}
+    \item Syntax and definition-error classification.
+    \item Hint-stage unlocking and answer-key unlocking rules.
+    \item Valid and invalid JSON problem persistence.
+    \item Replacement of existing author problem content.
+\end{itemize}
+
+Out of Scope:
+\begin{itemize}
+    \item Full HTTP request and response behavior.
+    \item Frontend timer rendering and browser state persistence.
+    \item External services such as live Google authentication or Docker execution.
+\end{itemize}
+
+\textbf{Approach:}
+The approach is automated unit testing with Python \texttt{unittest}. Each service is exercised directly with isolated data, fake executors, or temporary SQLite state so that the tests validate only service behavior and not the full application stack.
+
+\textbf{Test deliverables:}
+Representative unit test cases, coverage notes, basis paths for key functions, and automated unit test code.
+
+\textbf{Item pass/fail criteria:}
+A unit test passes if the target function returns the expected output, updates the correct state, and rejects invalid input consistently. A test fails if grading is misclassified, hint unlock rules are broken, or invalid problem data is accepted.
+
+\textbf{Environmental needs:}
+Python 3.12, project backend dependencies, and an isolated temporary SQLite database for persistence-related unit tests.
+
+\textbf{Responsibilities:}
+The backend developer responsible for grading, hints, or author uploads executes and reviews the unit tests and records the results in the technical documentation.
+
+\textbf{Staffing and training needs:}
+The tester should be familiar with Python, \texttt{unittest}, and the CodeSoCrat backend service structure.
+
+\textbf{Schedule:}
+Unit testing should be completed during the same sprint as service-layer changes so regression issues are caught before integration testing begins.
+
+\textbf{Risks and Mitigation:}
+The main risk is that a service may appear correct in a manual spot check while still mishandling an edge case such as syntax errors, invalid uploads, or repeated failed attempts. This is mitigated by building representative success-path and failure-path unit tests for each service family. Similar helper functions follow the same unit-test template so effort is not duplicated unnecessarily.
+
+\textbf{Approvals:}
+Any major logic changes should be reviewed by the team and approved before the new unit-test expectations are treated as final.
+
+\subsubsection{Source Code Coverage Tests}
+\textbf{Evaluation Service:}
+
+Cyclomatic complexity: 4
+
+Basis paths:
+\begin{itemize}
+    \item Syntax error in submitted code.
+    \item Missing required function definition.
+    \item Passing execution result.
+    \item Incorrect output or runtime failure returned by the executor.
+\end{itemize}
+
+\textbf{Progress Service:}
+
+Cyclomatic complexity: 5
+
+Basis paths:
+\begin{itemize}
+    \item Run request does not change progress.
+    \item Passing submit marks completion.
+    \item Valid failed submit increments failed-attempt count.
+    \item Fourth valid failed submit unlocks answer key.
+    \item Syntax or definition failure unlocks stage 3 hint.
+\end{itemize}
+
+\textbf{Problem Persistence Helpers:}
+
+Cyclomatic complexity: 3
+
+Basis paths:
+\begin{itemize}
+    \item Valid payload is persisted successfully.
+    \item Existing problem content is replaced successfully.
+    \item Invalid payload is rejected before persistence.
+\end{itemize}
+
+\subsubsection{Unit Tests and Results}
+Representative unit test cases:
+\begin{itemize}
+    \item Test syntax-error classification: Ensure \texttt{EvaluationService.evaluate()} returns \texttt{SyntaxError} with the correct line and excerpt.
+    \item Test first failed submission: Ensure \texttt{ProgressService.apply\_submission\_outcome()} unlocks the first hint stage after one valid failed submit.
+    \item Test answer-key threshold: Ensure repeated valid failed submits unlock the answer key only at the configured threshold.
+    \item Test valid problem persistence: Ensure a valid author problem payload is stored with example cases and hidden test cases.
+    \item Test invalid upload payload: Ensure schema validation rejects malformed difficulty or function-name values.
+\end{itemize}
+
+The remaining similar unit functions follow the same testing template: one success-path case, one invalid-input case, and one rule-based state-transition case.
+
+\subsection{Integration Testing}
+\textbf{Test Plan Identifier:}
+IT-CodeSoCrat-01
+
+\textbf{Introduction:}
+Integration testing verifies that CodeSoCrat's backend routes, database state, cookie-based authentication, and service-layer logic work correctly when combined. These tests focus on real application workflows rather than isolated functions.
+
+\textbf{Test item:}
+The items tested are the FastAPI routes in \texttt{backend/app/main.py}, database-backed user sessions, hint retrieval, author problem-management routes, Google auth linking behavior, and security-related request validation.
+
+\textbf{Features to test/not to test:}
+In Scope:
+\begin{itemize}
+    \item Registration, login, logout, and session restoration.
+    \item Run and submit behavior with progress and hints.
+    \item Author upload, edit, disable, enable, and delete workflows.
+    \item Google sign-in account creation and linking.
+    \item CSRF validation and rate-limited login flows.
+\end{itemize}
+
+Out of Scope:
+\begin{itemize}
+    \item CSS styling and animation behavior.
+    \item Real production DNS or HTTPS deployment.
+    \item Heavy load or scalability behavior.
+\end{itemize}
+
+\textbf{Approach:}
+The approach is automated integration testing with FastAPI \texttt{TestClient}, a temporary SQLite database, and fake hint and grading implementations. This keeps the tests deterministic while still exercising the real route, persistence, and session layers.
+
+\textbf{Test deliverables:}
+Automated integration test cases, route-level response verification, and persisted-state validation.
+
+\textbf{Item pass/fail criteria:}
+An integration test passes if the correct HTTP status is returned, the expected payload or cookie state is produced, and the database reflects the expected workflow outcome.
+
+\textbf{Environmental needs:}
+Python 3.12, FastAPI test dependencies, and a temporary SQLite database.
+
+\textbf{Responsibilities:}
+Backend and testing team members execute the integration suite and review failures affecting authentication, grading, hints, or author tools.
+
+\textbf{Staffing and training needs:}
+Testers should understand HTTP status codes, request payloads, CSRF-protected actions, and the difference between Student and Author roles.
+
+\textbf{Schedule:}
+Integration testing should be completed after backend feature implementation and before final system and acceptance testing.
+
+\textbf{Risks and Mitigation:}
+Individually correct units can still fail when combined, especially around cookies, CSRF tokens, role restrictions, and persisted progress. This risk is mitigated by testing complete flows such as login plus submit plus hint retrieval and author upload plus visibility filtering.
+
+\textbf{Approvals:}
+Significant integration changes should be reviewed during team meetings before release or submission.
+
+\subsubsection{Integration Tests and Results}
+Representative integration test cases:
+\begin{itemize}
+    \item Test student registration and login: Ensure a new user is created as \texttt{Student} and receives session and CSRF cookies.
+    \item Test run versus submit behavior: Ensure \texttt{Run} returns feedback without unlocking hints or progressing attempts.
+    \item Test hint unlocking flow: Ensure repeated failed submits unlock hint stages in the correct order and the answer key only after the threshold.
+    \item Test author lifecycle flow: Ensure an author can upload, update, disable, enable, and delete only their own custom problem.
+    \item Test Google account linking: Ensure a new Google account becomes a Student and an existing local account is linked correctly.
+\end{itemize}
+
+\subsection{System Testing}
+\textbf{Test Plan Identifier:}
+ST-CodeSoCrat-01
+
+\textbf{Introduction:}
+System testing verifies CodeSoCrat as a complete running application from user login through problem solving and author management. The goal is to confirm that the frontend and backend behave correctly together for real workflows, including timed mode and dashboard visibility rules.
+
+\textbf{Test item:}
+The Software Under Test (SUT) is the full CodeSoCrat application, including the React frontend, FastAPI backend, SQLite database, code execution pipeline, and optional Google login configuration.
+
+\textbf{Features to test/not to test:}
+In Scope:
+\begin{itemize}
+    \item Student login and starter-problem solving.
+    \item Timed mode activation, countdown, persistence, and auto-submit behavior.
+    \item Author JSON upload and custom-problem management.
+    \item Visibility filtering between Author and Student views.
+\end{itemize}
+
+Out of Scope:
+\begin{itemize}
+    \item Stress testing under high concurrent traffic.
+    \item Remote production deployment behavior.
+    \item Browser-compatibility testing across many devices.
+\end{itemize}
+
+\textbf{Approach:}
+The approach combines automated system workflow tests against the full backend stack with manual browser-based tests for timer presentation, keyboard accessibility, and author dashboard interaction. Automated tests verify end-to-end correctness, while manual tests verify user-visible behavior.
+
+\textbf{Test deliverables:}
+System workflow test code, manual execution steps, and expected results for major user scenarios.
+
+\textbf{Item pass/fail criteria:}
+A system test passes if the full workflow can be completed without broken state, incorrect role access, or inconsistent UI and backend behavior. Failure occurs if a user cannot complete the intended task or if the system records the wrong outcome.
+
+\textbf{Environmental needs:}
+Python 3.12, Node.js, project dependencies, local backend and frontend servers, and a browser.
+
+\textbf{Responsibilities:}
+Developers and testers run the automated workflow suite, execute the manual checklist, and record any blocking issue affecting the end-to-end system.
+
+\textbf{Staffing and training needs:}
+Testers should understand the student workflow, author workflow, timed mode, and the project's local startup commands.
+
+\textbf{Schedule:}
+System testing should be performed near the end of the sprint after integration testing has passed.
+
+\textbf{Risks and Mitigation:}
+The largest risk is that backend tests may pass while the full application still behaves incorrectly from the browser, especially around timed mode, role-based rendering, and author dashboard actions. This is mitigated by pairing automated system workflow tests with manual browser scenarios.
+
+\textbf{Approvals:}
+Final system testing results should be reviewed by the team before demonstration or submission.
+
+\subsubsection{System Tests and Results}
+Representative system test cases:
+\begin{itemize}
+    \item Test student end-to-end solve flow: Log in as student, open a starter problem, run code, and submit a passing solution.
+    \item Test timed submission flow: Enable timed mode, verify the timer persists across refresh, and ensure the submission still follows the normal grading pipeline.
+    \item Test author upload flow: Upload a JSON file, confirm it appears in the author dashboard, and ensure it can be edited or disabled.
+    \item Test visibility filter: Disable an author problem and confirm it no longer appears in the student problem list.
+\end{itemize}
+
+\subsection{Acceptance Testing}
+\textbf{Test Plan Identifier:}
+AT-CodeSoCrat-01
+
+\textbf{Introduction:}
+Acceptance testing verifies that CodeSoCrat satisfies the expected user stories for students and authors and that the final workflows are understandable and usable from a stakeholder point of view.
+
+\textbf{Test item:}
+Verification of project requirements, validation of workflow correctness, and acceptance of the final student and author experience.
+
+\textbf{Features to test/not to test:}
+In Scope:
+\begin{itemize}
+    \item Student ability to sign up, log in, solve problems, and receive guided feedback.
+    \item Author ability to upload and manage custom problems.
+    \item Timed-mode usability and Google sign-in availability when configured.
+    \item User ability to navigate major actions clearly.
+\end{itemize}
+
+Out of Scope:
+\begin{itemize}
+    \item Stress testing.
+    \item Internal implementation details.
+    \item Minor visual polish unrelated to workflow completion.
+\end{itemize}
+
+\textbf{Approach:}
+The approach is a combination of automated verification of core backend behavior and manual stakeholder-style testing of visible workflows in the running application.
+
+\textbf{Test deliverables:}
+Acceptance test cases, observed results, and stakeholder sign-off notes.
+
+\textbf{Item pass/fail criteria:}
+An acceptance test passes if the tester can complete the workflow successfully and the actual result matches the expected user outcome described in the test case.
+
+\textbf{Environmental needs:}
+Python 3.12, Node.js, local backend and frontend servers, browser access, and optional Google client configuration for Google sign-in testing.
+
+\textbf{Responsibilities:}
+The testing team prepares the environment and checklist, while stakeholders or team reviewers validate that the software meets the documented requirements.
+
+\textbf{Staffing and training needs:}
+Testers should be familiar with the application at the user level and understand the Student and Author roles.
+
+\textbf{Schedule:}
+Acceptance testing should be performed during the final sprint before project delivery.
+
+\textbf{Risks and Mitigation:}
+Users may misunderstand the interface or expect behavior different from the implemented rules, especially around hints, timer behavior, or author-only access. This is mitigated by writing explicit acceptance scenarios with clear expected outcomes and by reviewing them with the team before final sign-off.
+
+\textbf{Approvals:}
+Instructor, client, or team sign-off is required depending on the project submission process.
+
+\subsubsection{Acceptance Tests and Results}
+Representative acceptance test cases:
+\begin{itemize}
+    \item As a student, I can sign up, log in, and begin solving a starter problem.
+    \item As a student, I can submit incorrect code and receive progressively stronger hints before the answer key unlocks.
+    \item As a student, I can choose timed mode and have my current work auto-submitted when time expires.
+    \item As an author, I can upload a JSON problem and manage only my own custom problems.
+    \item As a user, I can use Google sign-in when it has been configured by the project owner.
+\end{itemize}
+
+\subsection{Security Testing}
+\textbf{Test Plan Identifier:}
+SEC-CodeSoCrat-01
+
+\textbf{Introduction:}
+Security testing focuses on the protections implemented directly in CodeSoCrat, including CSRF protection, role restrictions, input validation, rate limiting, and safe handling of author-managed content. The goal is to confirm that common misuse cases are blocked.
+
+\textbf{Test item:}
+Security-related backend behavior including CSRF validation, login rate limiting, strict request-schema validation, starter-problem protection, and author ownership enforcement.
+
+\textbf{Features to test/not to test:}
+In Scope:
+\begin{itemize}
+    \item CSRF protection on state-changing routes.
+    \item Rate limiting of repeated failed login attempts.
+    \item Request schema validation for login and submission payloads.
+    \item Author-only management routes and starter-problem immutability.
+\end{itemize}
+
+Out of Scope:
+\begin{itemize}
+    \item Full penetration testing.
+    \item External network and infrastructure security assessment.
+    \item Browser extension or operating-system-specific attack surfaces.
+\end{itemize}
+
+\textbf{Approach:}
+The approach is automated backend security testing using isolated API requests that deliberately omit required protections or send malformed input. Each case verifies that the server rejects the unsafe request with the correct response code.
+
+\textbf{Test deliverables:}
+Automated security test cases, negative-input scenarios, and documented expected rejection behavior.
+
+\textbf{Item pass/fail criteria:}
+A security test passes if the unsafe request is rejected, no protected state changes occur, and the response is consistent with the intended safeguard. The test fails if unauthorized modification or malformed input is accepted.
+
+\textbf{Environmental needs:}
+Python 3.12, project backend dependencies, and isolated test database state.
+
+\textbf{Responsibilities:}
+The backend team executes the security suite and records any failed safeguard as a high-priority issue.
+
+\textbf{Staffing and training needs:}
+The tester should understand HTTP request validation, CSRF-protected flows, and role-based access restrictions.
+
+\textbf{Schedule:}
+Security testing should run whenever authentication, author permissions, or validation rules change.
+
+\textbf{Risks and Mitigation:}
+If CSRF checks, validation rules, or role guards regress, the application could allow unauthorized actions or malformed data into the system. This is mitigated by keeping a dedicated security-focused automated suite in addition to broader integration tests.
+
+\textbf{Approvals:}
+Security-related changes should be reviewed and approved by the team before release.
+
+\subsubsection{Security Tests and Results}
+Representative security test cases:
+\begin{itemize}
+    \item Test missing CSRF header: Ensure state-changing requests are rejected with HTTP 403.
+    \item Test login rate limiting: Ensure repeated failed logins return HTTP 429 and \texttt{Retry-After}.
+    \item Test invalid login payload shape: Ensure unexpected fields are rejected by schema validation.
+    \item Test invalid submission problem identifier: Ensure malformed problem ids are rejected.
+    \item Test starter-problem protection: Ensure authors cannot disable or edit starter problems.
+\end{itemize}
+
+\subsubsection{Manual Browser Checklist}
+The following checklist supports UI-level system and acceptance testing for behaviors that are not fully asserted by backend automation, especially timed-mode persistence and keyboard accessibility.
+
+\begin{tabular}{|p{2.4cm}|p{5.3cm}|p{4.5cm}|p{1.4cm}|}
+\hline
+\textbf{Test ID} & \textbf{Manual Steps} & \textbf{Expected Result} & \textbf{Pass/Fail} \\
+\hline
+MB-CS-01 & Log in as student, open a problem, enable timed mode, start the timer, then refresh the page. & The timer persists after refresh and resumes from the saved state instead of resetting unexpectedly. &  \\
+\hline
+MB-CS-02 & Let a running timed challenge expire without manually submitting. & The application auto-submits the current code and shows the expired timed state correctly. &  \\
+\hline
+MB-CS-03 & Use only \texttt{Tab}, \texttt{Shift+Tab}, \texttt{Enter}, and \texttt{Space} on the login screen and learner workspace. & Major actions remain reachable without a mouse and visible focus states appear on interactive controls. &  \\
+\hline
+MB-CS-04 & Log in as author and navigate the author dashboard with keyboard only, including upload controls and problem actions. & Upload controls and author actions remain keyboard accessible with visible focus indicators. &  \\
+\hline
+MB-CS-05 & Hover over buttons, chips, and author dashboard controls. & Hover feedback is clear and consistent enough to identify the currently hovered control. &  \\
+\hline
+MB-CS-06 & Configure Google login, reload the login page, and inspect the Google sign-in area. & The Google sign-in button appears only when backend Google configuration is enabled. &  \\
+\hline
+\end{tabular}
+

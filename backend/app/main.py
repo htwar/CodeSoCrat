@@ -52,6 +52,8 @@ progress_service = ProgressService()
 hint_service = OllamaHintService()
 
 
+# Application startup seeds demo users and starter problems so the local app is
+# usable immediately after the API boots.
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
@@ -77,6 +79,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
+    # Apply centralized throttling before the request reaches the route handler.
     try:
         enforce_rate_limit(request)
     except HTTPException as exc:
@@ -85,6 +88,8 @@ async def rate_limit_middleware(request: Request, call_next):
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
+    # Set both the signed session cookie and the matching CSRF cookie used by
+    # the frontend for POST/PUT/DELETE requests.
     response.set_cookie(
         key=settings.session_cookie_name,
         value=token,
@@ -106,6 +111,7 @@ def _set_session_cookie(response: Response, token: str) -> None:
 
 
 def _clear_session_cookie(response: Response) -> None:
+    # Remove both auth-related cookies during logout.
     response.delete_cookie(
         key=settings.session_cookie_name,
         httponly=True,
@@ -123,6 +129,8 @@ def _clear_session_cookie(response: Response) -> None:
 
 
 def _build_login_response(user: User) -> LoginResponse:
+    # Normalize the session payload shape shared by login, register, Google
+    # auth, and session-restore endpoints.
     return LoginResponse(
         user_id=str(user.id),
         email=user.email,
@@ -132,6 +140,8 @@ def _build_login_response(user: User) -> LoginResponse:
     )
 
 
+# Problem responses are tailored to the current viewer so author users can see
+# which custom problems they are allowed to manage.
 def _serialize_problem(problem: Problem, *, viewer: User) -> ProblemSummary:
     can_manage = viewer.role == "Author" and problem.author_id == viewer.id and problem.source != "starter"
     return ProblemSummary(
@@ -160,6 +170,7 @@ def _serialize_problem(problem: Problem, *, viewer: User) -> ProblemSummary:
 
 
 def _get_visible_problem(problem_id: str, db: Session) -> Problem:
+    # Fetch a problem the learner is actually allowed to attempt.
     problem = (
         db.query(Problem)
         .options(
@@ -181,6 +192,8 @@ def _get_visible_problem(problem_id: str, db: Session) -> Problem:
 
 
 def _get_manageable_problem(problem_id: str, *, user: User, db: Session) -> Problem:
+    # Fetch one author-owned custom problem and enforce that starter problems
+    # remain read-only.
     problem = (
         db.query(Problem)
         .options(selectinload(Problem.example_cases), selectinload(Problem.author))
@@ -198,11 +211,13 @@ def _get_manageable_problem(problem_id: str, *, user: User, db: Session) -> Prob
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
+    # Minimal readiness endpoint for local checks and container health probes.
     return {"status": "ok"}
 
 
 @app.get("/auth/google/config")
 def get_google_auth_config() -> dict[str, str | bool]:
+    # Let the frontend know whether the Google button should be rendered.
     return {
         "enabled": bool(settings.google_client_id),
         "client_id": settings.google_client_id,
@@ -211,6 +226,7 @@ def get_google_auth_config() -> dict[str, str | bool]:
 
 @app.post("/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> LoginResponse:
+    # Authenticate a local email/password account and issue fresh cookies.
     enforce_login_identity_rate_limit(payload.email)
     user = db.query(User).filter(User.email == payload.email).first()
     if user is None or not verify_password(payload.password, user.password_hash):
@@ -222,6 +238,7 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
 
 @app.post("/auth/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, response: Response, db: Session = Depends(get_db)) -> LoginResponse:
+    # Create a new student account, then sign it in immediately.
     enforce_login_identity_rate_limit(payload.email)
     existing_user = db.query(User).filter(User.email == payload.email).first()
     if existing_user is not None:
@@ -243,6 +260,8 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
 
 @app.post("/auth/google", response_model=LoginResponse)
 def google_auth(payload: GoogleAuthRequest, response: Response, db: Session = Depends(get_db)) -> LoginResponse:
+    # Sign in with a verified Google credential, linking to an existing account
+    # when the email or Google subject already exists.
     claims = verify_google_id_token(payload.credential)
     email = validate_email(str(claims["email"]))
     enforce_login_identity_rate_limit(email)
@@ -279,6 +298,7 @@ def google_auth(payload: GoogleAuthRequest, response: Response, db: Session = De
 
 @app.get("/auth/session", response_model=LoginResponse)
 def get_session(response: Response, request: Request, user: User = Depends(get_current_user)) -> LoginResponse:
+    # Restore the current user from the session cookie and refresh cookie age.
     session_token = request.cookies.get(settings.session_cookie_name)
     if session_token:
         _set_session_cookie(response, session_token)
@@ -287,6 +307,7 @@ def get_session(response: Response, request: Request, user: User = Depends(get_c
 
 @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 def logout(_csrf: None = Depends(require_csrf)) -> Response:
+    # Clear cookies so the browser is no longer authenticated.
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     _clear_session_cookie(response)
     return response
@@ -299,6 +320,8 @@ def list_problems(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProblemListResponse:
+    # Return the active problem catalog filtered by difficulty and optional
+    # source for the currently logged-in user.
     query = (
         db.query(Problem)
         .options(selectinload(Problem.example_cases), selectinload(Problem.author))
@@ -314,6 +337,8 @@ def list_problems(
     return ProblemListResponse(problems=[_serialize_problem(problem, viewer=user) for problem in problems])
 
 
+# All code execution paths share the same backend evaluation flow so run,
+# submit, and timed auto-submit produce the same result structure.
 def _execute_code(
     *,
     execution_type: str,
@@ -379,6 +404,7 @@ def run_code(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SubmissionResponse:
+    # Practice-only execution path that does not advance durable progress.
     return _execute_code(execution_type="Run", payload=payload, user=user, db=db)
 
 
@@ -389,6 +415,7 @@ def submit_code(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SubmissionResponse:
+    # Full submission path that updates attempts, hints, and answer-key unlocks.
     return _execute_code(execution_type="Submit", payload=payload, user=user, db=db)
 
 
@@ -399,6 +426,8 @@ def submit_code_legacy(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SubmissionResponse:
+    # Backward-compatible alias for older clients that still post to
+    # `/submissions`.
     return _execute_code(execution_type="Submit", payload=payload, user=user, db=db)
 
 
@@ -409,6 +438,8 @@ def get_hints(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HintResponse:
+    # Return currently unlocked hints and optionally generate one specific stage
+    # on demand for the latest failing submission.
     problem = db.query(Problem).filter(Problem.problem_id == problem_id, Problem.is_deleted.is_(False)).first()
     if problem is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
@@ -473,6 +504,7 @@ def get_answer_key(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AnswerKeyResponse:
+    # Reveal the stored answer key only after the learner has unlocked it.
     problem = (
         db.query(Problem)
         .options(selectinload(Problem.answer_key))
@@ -503,6 +535,8 @@ def list_author_dashboard_problems(
     user: User = Depends(require_author),
     db: Session = Depends(get_db),
 ) -> AuthorProblemListResponse:
+    # Drive the author dashboard list, combining starter problems with the
+    # current author's own custom uploads.
     query = db.query(Problem).options(selectinload(Problem.example_cases), selectinload(Problem.author))
     if not include_deleted:
         query = query.filter(Problem.is_deleted.is_(False))
@@ -524,6 +558,7 @@ def get_author_problem(
     user: User = Depends(require_author),
     db: Session = Depends(get_db),
 ) -> ProblemUploadPayload:
+    # Load one author-owned custom problem back into editable JSON.
     problem = (
         db.query(Problem)
         .options(
@@ -581,6 +616,7 @@ def upload_problem(
     user: User = Depends(require_author),
     db: Session = Depends(get_db),
 ) -> ProblemUploadResponse:
+    # Create a new custom problem from the JSON currently in the author editor.
     existing = db.query(Problem).filter(Problem.problem_id == payload.problem_id).first()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Duplicate problem_id.")
@@ -597,6 +633,7 @@ async def upload_problem_file(
     user: User = Depends(require_author),
     db: Session = Depends(get_db),
 ) -> ProblemUploadResponse:
+    # Import one JSON file directly through multipart upload for author users.
     if not file.filename or not file.filename.lower().endswith(".json"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please upload a single .json problem file.")
 
@@ -627,6 +664,7 @@ def update_problem(
     user: User = Depends(require_author),
     db: Session = Depends(get_db),
 ) -> ProblemUpdateResponse:
+    # Replace an existing custom problem with the edited JSON payload.
     if payload.problem_id != problem_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="problem_id in the payload must match the selected problem.")
 
@@ -644,6 +682,7 @@ def disable_problem(
     user: User = Depends(require_author),
     db: Session = Depends(get_db),
 ) -> ProblemUpdateResponse:
+    # Hide a custom problem from the learner catalog without deleting it.
     problem = _get_manageable_problem(problem_id, user=user, db=db)
     problem.is_active = False
     db.commit()
@@ -658,6 +697,7 @@ def enable_problem(
     user: User = Depends(require_author),
     db: Session = Depends(get_db),
 ) -> ProblemUpdateResponse:
+    # Make a previously disabled custom problem visible again.
     problem = _get_manageable_problem(problem_id, user=user, db=db)
     problem.is_active = True
     db.commit()
@@ -672,6 +712,7 @@ def delete_problem(
     user: User = Depends(require_author),
     db: Session = Depends(get_db),
 ) -> ProblemUpdateResponse:
+    # Soft-delete a custom problem so historical data stays intact.
     problem = _get_manageable_problem(problem_id, user=user, db=db)
     problem.is_active = False
     problem.is_deleted = True
@@ -687,6 +728,8 @@ def reset_problem_progress(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ResetProgressResponse:
+    # Wipe one learner's submissions, hints, and unlocks for a problem so they
+    # can start fresh.
     problem = db.query(Problem).filter(Problem.problem_id == problem_id, Problem.is_deleted.is_(False)).first()
     if problem is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
