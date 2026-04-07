@@ -330,7 +330,6 @@ def _execute_code(
     )
 
     progress = progress_service.get_or_create(db, user=user, problem=problem)
-    # Only official Submit executions are allowed to change hint/answer-key progression.
     progress_service.apply_submission_outcome(
         progress=progress,
         execution_type=execution_type,
