@@ -208,14 +208,13 @@ def _execute_code(
     if problem is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
 
+    progress = progress_service.get_or_create(db, user=user, problem=problem)
     test_cases = [(json.loads(case.input_json), json.loads(case.expected_json)) for case in problem.test_cases]
     evaluation = evaluation_service.evaluate(
         code=payload.code,
         function_name=problem.function_name,
         test_cases=test_cases,
     )
-
-    progress = progress_service.get_or_create(db, user=user, problem=problem)
     # Only official Submit executions are allowed to change hint/answer-key progression.
     progress_service.apply_submission_outcome(
         progress=progress,

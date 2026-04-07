@@ -218,6 +218,11 @@ button:disabled {
   margin-bottom: 18px;
 }
 
+.timer-chip.expired {
+  background: rgba(159, 45, 32, 0.12);
+  color: var(--danger);
+}
+
 .panel-actions {
   display: flex;
   gap: 10px;
