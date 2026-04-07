@@ -3,6 +3,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen
 from typing import Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -20,8 +23,56 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
-def verify_password(password: str, password_hash: str) -> bool:
+def verify_password(password: str, password_hash: Optional[str]) -> bool:
+    if not password_hash:
+        return False
     return hmac.compare_digest(hash_password(password), password_hash)
+
+
+def _decode_jwt_without_verification(token: str) -> dict:
+    try:
+        _header, payload, _signature = token.split(".", 2)
+        padded = payload + "=" * (-len(payload) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8")
+        return json.loads(decoded)
+    except Exception as exc:  # pragma: no cover - defensive parsing
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Google credential.") from exc
+
+
+def verify_google_id_token(token: str) -> dict:
+    if not settings.google_client_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google sign-in is not configured for this environment.",
+        )
+
+    payload = _decode_jwt_without_verification(token)
+    audience = payload.get("aud")
+    issuer = payload.get("iss")
+    if audience != settings.google_client_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google credential audience mismatch.")
+    if issuer not in {"accounts.google.com", "https://accounts.google.com"}:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google credential issuer mismatch.")
+
+    try:
+        with urlopen(
+            "https://oauth2.googleapis.com/tokeninfo?id_token=" + token,
+            timeout=5,
+        ) as response:
+            verified = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google sign-in could not be verified right now.",
+        ) from exc
+
+    if verified.get("aud") != settings.google_client_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google credential audience mismatch.")
+    if not verified.get("sub") or not verified.get("email"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google credential is missing required claims.")
+    if verified.get("email_verified") not in {"true", True}:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Google email must be verified.")
+    return verified
 
 
 def create_token(user: User) -> str:

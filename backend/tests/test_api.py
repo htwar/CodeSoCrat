@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import sys
@@ -25,8 +26,10 @@ class BackendFlowTests(unittest.TestCase):
         settings.rate_limit_user_authenticated = 90
         settings.login_rate_limit_ip = 10
         settings.login_rate_limit_user = 5
+        settings.google_client_id = "test-google-client-id"
 
         from app.database import Base, SessionLocal, engine
+        import app.main as main_module
         from app.main import app, evaluation_service, hint_service
         from app.rate_limit import rate_limiter
         from app.services.evaluation import EvaluationResult
@@ -35,6 +38,7 @@ class BackendFlowTests(unittest.TestCase):
         cls.Base = Base
         cls.SessionLocal = SessionLocal
         cls.engine = engine
+        cls.main_module = main_module
         cls.seed_default_users = seed_default_users
         cls.seed_starter_problems = seed_starter_problems
         cls.rate_limiter = rate_limiter
@@ -149,6 +153,7 @@ class BackendFlowTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["role"], "Student")
         self.assertEqual(payload["email"], "new.student@example.com")
+        self.assertEqual(payload["auth_provider"], "local")
         self.assertIn("codesocrat_session", response.cookies)
         self.assertIn("codesocrat_csrf", response.cookies)
 
@@ -244,19 +249,12 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(hints.status_code, 403)
         self.assertEqual(hints.json()["detail"], "No hints unlocked yet.")
 
-    def test_answer_key_unlocks_after_four_valid_failed_submits(self) -> None:
+    def test_answer_key_unlocks_after_three_valid_failed_submits(self) -> None:
         self._login("student@codesocrat.dev", "studentpass")
 
         for _ in range(3):
             response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
             self.assertEqual(response.status_code, 200)
-
-        still_locked = self.client.get("/answer-key", params={"problem_id": "sum_two_numbers"})
-        self.assertEqual(still_locked.status_code, 200)
-        self.assertFalse(still_locked.json()["unlocked"])
-
-        response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
-        self.assertEqual(response.status_code, 200)
 
         answer_key = self.client.get("/answer-key", params={"problem_id": "sum_two_numbers"})
         self.assertEqual(answer_key.status_code, 200)
@@ -369,6 +367,132 @@ class BackendFlowTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 422)
+
+    def test_author_uploads_problem_file(self) -> None:
+        self._login("author@codesocrat.dev", "authorpass")
+
+        response = self.client.post(
+            "/author/problems/upload-file",
+            headers=self._csrf_headers(),
+            files={
+                "file": (
+                    "file_problem.json",
+                    json.dumps(
+                        {
+                            "problem_id": "square_number",
+                            "title": "Square Number",
+                            "prompt": "Return the square of the number.",
+                            "difficulty": "Easy",
+                            "function_name": "square_number",
+                            "starter_code": "def square_number(n):\n    pass\n",
+                            "test_cases": [{"input": [3], "expected": 9}],
+                        }
+                    ),
+                    "application/json",
+                )
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["problem_id"], "square_number")
+
+    def test_google_auth_creates_student_account(self) -> None:
+        type(self).main_module.verify_google_id_token = lambda _credential: {
+            "sub": "google-sub-1",
+            "email": "google.student@example.com",
+            "email_verified": "true",
+            "name": "Google Student",
+            "aud": "test-google-client-id",
+        }
+
+        response = self.client.post("/auth/google", json={"credential": "signed-token"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["email"], "google.student@example.com")
+        self.assertEqual(payload["role"], "Student")
+        self.assertEqual(payload["auth_provider"], "google")
+        self.assertEqual(payload["display_name"], "Google Student")
+
+    def test_google_auth_links_existing_local_account(self) -> None:
+        type(self).main_module.verify_google_id_token = lambda _credential: {
+            "sub": "google-sub-2",
+            "email": "student@codesocrat.dev",
+            "email_verified": "true",
+            "name": "Student Demo",
+            "aud": "test-google-client-id",
+        }
+
+        response = self.client.post("/auth/google", json={"credential": "signed-token"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["email"], "student@codesocrat.dev")
+        self.assertEqual(payload["auth_provider"], "local+google")
+
+    def test_author_can_list_update_disable_enable_and_delete_own_problem(self) -> None:
+        self._login("author@codesocrat.dev", "authorpass")
+
+        upload = self.client.post(
+            "/author/problems/upload",
+            headers=self._csrf_headers(),
+            json={
+                "problem_id": "triple_number",
+                "title": "Triple Number",
+                "prompt": "Return three times the number.",
+                "difficulty": "Easy",
+                "function_name": "triple_number",
+                "starter_code": "def triple_number(n):\n    pass\n",
+                "example_cases": [{"input": [2], "expected": 6}],
+                "test_cases": [{"input": [3], "expected": 9}],
+            },
+        )
+        self.assertEqual(upload.status_code, 200)
+
+        listing = self.client.get("/author/problems", params={"source": "author"})
+        self.assertEqual(listing.status_code, 200)
+        problems = listing.json()["problems"]
+        self.assertTrue(any(problem["problem_id"] == "triple_number" for problem in problems))
+
+        detail = self.client.get("/author/problems/triple_number")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["title"], "Triple Number")
+
+        update = self.client.put(
+            "/author/problems/triple_number",
+            headers=self._csrf_headers(),
+            json={
+                "problem_id": "triple_number",
+                "title": "Triple Any Number",
+                "prompt": "Return three times the provided number.",
+                "difficulty": "Easy",
+                "function_name": "triple_number",
+                "starter_code": "def triple_number(n):\n    return n * 3\n",
+                "example_cases": [{"input": [2], "expected": 6}],
+                "test_cases": [{"input": [3], "expected": 9}],
+            },
+        )
+        self.assertEqual(update.status_code, 200)
+
+        disable = self.client.post("/author/problems/triple_number/disable", headers=self._csrf_headers())
+        self.assertEqual(disable.status_code, 200)
+        self.assertFalse(disable.json()["is_active"])
+
+        student_session = TestClient(type(self).main_module.app)
+        student_login = student_session.post("/auth/login", json={"email": "student@codesocrat.dev", "password": "studentpass"})
+        self.assertEqual(student_login.status_code, 200)
+        visible = student_session.get("/problems")
+        self.assertFalse(any(problem["problem_id"] == "triple_number" for problem in visible.json()["problems"]))
+
+        enable = self.client.post("/author/problems/triple_number/enable", headers=self._csrf_headers())
+        self.assertEqual(enable.status_code, 200)
+        self.assertTrue(enable.json()["is_active"])
+
+        delete = self.client.delete("/author/problems/triple_number", headers=self._csrf_headers())
+        self.assertEqual(delete.status_code, 200)
+        self.assertTrue(delete.json()["is_deleted"])
+
+    def test_author_cannot_modify_starter_problem(self) -> None:
+        self._login("author@codesocrat.dev", "authorpass")
+        response = self.client.post("/author/problems/sum_two_numbers/disable", headers=self._csrf_headers())
+        self.assertEqual(response.status_code, 403)
 
     def test_login_rejects_unexpected_fields(self) -> None:
         response = self.client.post(

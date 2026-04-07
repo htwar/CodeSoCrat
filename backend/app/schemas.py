@@ -59,10 +59,21 @@ class RegisterRequest(StrictModel):
         return self
 
 
+class GoogleAuthRequest(StrictModel):
+    credential: str = Field(min_length=1, max_length=4096)
+
+    @field_validator("credential")
+    @classmethod
+    def validate_credential(cls, value: str) -> str:
+        return normalize_text(value, "credential", max_length=4096)
+
+
 class LoginResponse(StrictModel):
     user_id: str
     email: str
     role: str
+    display_name: Optional[str] = None
+    auth_provider: str = "local"
 
 
 class ProblemSummary(StrictModel):
@@ -74,6 +85,13 @@ class ProblemSummary(StrictModel):
     starter_code: Optional[str]
     example_cases: list["ProblemTestCasePayload"] = Field(default_factory=list)
     source: str
+    is_active: bool = True
+    is_deleted: bool = False
+    author_id: Optional[str] = None
+    author_email: Optional[str] = None
+    can_edit: bool = False
+    can_disable: bool = False
+    can_delete: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -253,9 +271,20 @@ class ProblemUploadResponse(StrictModel):
     problem_id: str
 
 
+class ProblemUpdateResponse(StrictModel):
+    success: bool
+    problem_id: str
+    is_active: bool
+    is_deleted: bool
+
+
 class ResetProgressResponse(StrictModel):
     success: bool
     problem_id: str
+
+
+class AuthorProblemListResponse(StrictModel):
+    problems: list[ProblemSummary]
 
 
 class AnswerKeyResponse(StrictModel):

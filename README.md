@@ -11,6 +11,7 @@ CodeSoCrat is a web application for Python coding practice. Students can work th
 - Adaptive conceptual, strategic, and syntactic hints
 - Hidden grading test cases with visible sample cases
 - Answer key unlocking after repeated valid failed submissions
+- Optional timed mode with difficulty-based countdowns and auto-submit on expiry
 - Author-only problem uploads with schema validation
 - Docker sandbox execution for Python code
 - Production deployment path with PostgreSQL, Caddy, and Docker Compose
@@ -33,6 +34,14 @@ cp .env.example .env
 cp frontend/.env.example frontend/.env
 ```
 
+If you want Google login, put your Google OAuth client id in `.env`:
+
+```env
+CODESOCRAT_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+```
+
+This is the only project file change needed for local Google configuration. The backend already reads `.env` automatically and the frontend asks the backend whether Google auth is enabled.
+
 2. Start the backend:
 
 ```bash
@@ -48,6 +57,15 @@ npm run dev
 ```
 
 4. Open the app at `http://127.0.0.1:5173`.
+
+## Author JSON Uploads
+
+Authors can add problems in two ways from the dashboard:
+
+- Load a JSON file into the Monaco editor, review or edit it, then upload
+- Upload a `.json` problem file directly
+
+Each file must contain exactly one problem payload matching the CodeSoCrat problem schema. The backend parses the uploaded JSON and uses the file's `difficulty`, `function_name`, test cases, hints, and answer key fields to create the problem.
 
 ## Production Deployment
 

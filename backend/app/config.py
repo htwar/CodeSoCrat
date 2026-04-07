@@ -66,6 +66,8 @@ class Settings(BaseModel):
     rate_limit_user_authenticated: int = int(os.getenv("CODESOCRAT_RATE_LIMIT_USER_AUTHENTICATED", "90"))
     login_rate_limit_ip: int = int(os.getenv("CODESOCRAT_LOGIN_RATE_LIMIT_IP", "10"))
     login_rate_limit_user: int = int(os.getenv("CODESOCRAT_LOGIN_RATE_LIMIT_USER", "5"))
+    google_client_id: str = os.getenv("CODESOCRAT_GOOGLE_CLIENT_ID", "")
+    google_client_secret: str = os.getenv("CODESOCRAT_GOOGLE_CLIENT_SECRET", "")
 
 
 settings = Settings()

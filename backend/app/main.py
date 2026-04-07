@@ -4,22 +4,35 @@ import json
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
-from app.auth import create_csrf_token, create_token, get_current_user, hash_password, require_author, require_csrf, verify_password
-from app.config import settings
+from app.auth import (
+    create_csrf_token,
+    create_token,
+    get_current_user,
+    hash_password,
+    require_author,
+    require_csrf,
+    verify_google_id_token,
+    verify_password,
+)
 from app.database import Base, SessionLocal, engine, ensure_schema_evolution, get_db
-from app.models import GeneratedHint, Problem, Submission, TestCase, User, UserProblemProgress
+from app.models import GeneratedHint, Problem, Submission, User, UserProblemProgress
+from app.rate_limit import enforce_login_identity_rate_limit, enforce_rate_limit
 from app.schemas import (
     AnswerKeyResponse,
+    AuthorProblemListResponse,
+    GoogleAuthRequest,
     HintResponse,
     LoginRequest,
     LoginResponse,
     ProblemListResponse,
     ProblemSummary,
+    ProblemUpdateResponse,
     ProblemUploadPayload,
     ProblemUploadResponse,
     RegisterRequest,
@@ -27,11 +40,12 @@ from app.schemas import (
     SubmissionRequest,
     SubmissionResponse,
 )
-from app.services.bootstrap import persist_problem, seed_default_users, seed_starter_problems
+from app.security import validate_email
+from app.config import settings
+from app.services.bootstrap import persist_problem, replace_problem_contents, seed_default_users, seed_starter_problems
 from app.services.evaluation import EvaluationService
 from app.services.hints import HintContext, OllamaHintService, cache_generated_hint
 from app.services.progress import ProgressService
-from app.rate_limit import enforce_login_identity_rate_limit, enforce_rate_limit
 
 evaluation_service = EvaluationService()
 progress_service = ProgressService()
@@ -63,7 +77,6 @@ app.add_middleware(
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    # Apply a lightweight per-IP and per-user throttle before route execution.
     try:
         enforce_rate_limit(request)
     except HTTPException as exc:
@@ -109,9 +122,91 @@ def _clear_session_cookie(response: Response) -> None:
     )
 
 
+def _build_login_response(user: User) -> LoginResponse:
+    return LoginResponse(
+        user_id=str(user.id),
+        email=user.email,
+        role=user.role,
+        display_name=user.display_name,
+        auth_provider=user.auth_provider,
+    )
+
+
+def _serialize_problem(problem: Problem, *, viewer: User) -> ProblemSummary:
+    can_manage = viewer.role == "Author" and problem.author_id == viewer.id and problem.source != "starter"
+    return ProblemSummary(
+        problem_id=problem.problem_id,
+        title=problem.title,
+        prompt=problem.prompt,
+        difficulty=problem.difficulty,
+        function_name=problem.function_name,
+        starter_code=problem.starter_code,
+        example_cases=[
+            {
+                "input": json.loads(example_case.input_json),
+                "expected": json.loads(example_case.expected_json),
+            }
+            for example_case in problem.example_cases
+        ],
+        source=problem.source,
+        is_active=problem.is_active,
+        is_deleted=problem.is_deleted,
+        author_id=str(problem.author_id) if problem.author_id is not None else None,
+        author_email=problem.author.email if problem.author is not None else None,
+        can_edit=can_manage and not problem.is_deleted,
+        can_disable=can_manage and not problem.is_deleted,
+        can_delete=can_manage and not problem.is_deleted,
+    )
+
+
+def _get_visible_problem(problem_id: str, db: Session) -> Problem:
+    problem = (
+        db.query(Problem)
+        .options(
+            selectinload(Problem.test_cases),
+            selectinload(Problem.answer_key),
+            selectinload(Problem.hints),
+            selectinload(Problem.example_cases),
+        )
+        .filter(
+            Problem.problem_id == problem_id,
+            Problem.is_deleted.is_(False),
+            Problem.is_active.is_(True),
+        )
+        .first()
+    )
+    if problem is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
+    return problem
+
+
+def _get_manageable_problem(problem_id: str, *, user: User, db: Session) -> Problem:
+    problem = (
+        db.query(Problem)
+        .options(selectinload(Problem.example_cases), selectinload(Problem.author))
+        .filter(Problem.problem_id == problem_id)
+        .first()
+    )
+    if problem is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
+    if problem.source == "starter":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Starter problems are read-only.")
+    if problem.author_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You may only manage your own uploaded problems.")
+    return problem
+
+
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/auth/google/config")
+def get_google_auth_config() -> dict[str, str | bool]:
+    return {
+        "enabled": bool(settings.google_client_id),
+        "client_id": settings.google_client_id,
+    }
 
 
 @app.post("/auth/login", response_model=LoginResponse)
@@ -122,7 +217,7 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
     _set_session_cookie(response, create_token(user))
-    return LoginResponse(user_id=str(user.id), email=user.email, role=user.role)
+    return _build_login_response(user)
 
 
 @app.post("/auth/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
@@ -136,12 +231,50 @@ def register(payload: RegisterRequest, response: Response, db: Session = Depends
         email=payload.email,
         password_hash=hash_password(payload.password),
         role="Student",
+        auth_provider="local",
+        display_name=payload.email.split("@", 1)[0],
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     _set_session_cookie(response, create_token(user))
-    return LoginResponse(user_id=str(user.id), email=user.email, role=user.role)
+    return _build_login_response(user)
+
+
+@app.post("/auth/google", response_model=LoginResponse)
+def google_auth(payload: GoogleAuthRequest, response: Response, db: Session = Depends(get_db)) -> LoginResponse:
+    claims = verify_google_id_token(payload.credential)
+    email = validate_email(str(claims["email"]))
+    enforce_login_identity_rate_limit(email)
+
+    user = (
+        db.query(User)
+        .filter(or_(User.google_sub == str(claims["sub"]), User.email == email))
+        .first()
+    )
+
+    if user is None:
+        user = User(
+            email=email,
+            password_hash=None,
+            role="Student",
+            auth_provider="google",
+            google_sub=str(claims["sub"]),
+            display_name=claims.get("name") or email.split("@", 1)[0],
+        )
+        db.add(user)
+    else:
+        user.google_sub = str(claims["sub"])
+        user.display_name = claims.get("name") or user.display_name
+        if user.auth_provider == "local":
+            user.auth_provider = "local+google"
+        elif user.auth_provider != "local+google":
+            user.auth_provider = "google"
+
+    db.commit()
+    db.refresh(user)
+    _set_session_cookie(response, create_token(user))
+    return _build_login_response(user)
 
 
 @app.get("/auth/session", response_model=LoginResponse)
@@ -149,7 +282,7 @@ def get_session(response: Response, request: Request, user: User = Depends(get_c
     session_token = request.cookies.get(settings.session_cookie_name)
     if session_token:
         _set_session_cookie(response, session_token)
-    return LoginResponse(user_id=str(user.id), email=user.email, role=user.role)
+    return _build_login_response(user)
 
 
 @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
@@ -162,34 +295,23 @@ def logout(_csrf: None = Depends(require_csrf)) -> Response:
 @app.get("/problems", response_model=ProblemListResponse)
 def list_problems(
     difficulty: Optional[str] = Query(default=None, pattern="^(Easy|Medium|Hard)$"),
+    source: Optional[str] = Query(default=None, pattern="^(starter|author)$"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProblemListResponse:
-    query = db.query(Problem).options(selectinload(Problem.example_cases)).order_by(Problem.difficulty, Problem.title)
+    query = (
+        db.query(Problem)
+        .options(selectinload(Problem.example_cases), selectinload(Problem.author))
+        .filter(Problem.is_deleted.is_(False), Problem.is_active.is_(True))
+        .order_by(Problem.difficulty, Problem.title)
+    )
     if difficulty:
         query = query.filter(Problem.difficulty == difficulty)
+    if source:
+        query = query.filter(Problem.source == source)
+
     problems = query.all()
-    return ProblemListResponse(
-        problems=[
-            ProblemSummary(
-                problem_id=problem.problem_id,
-                title=problem.title,
-                prompt=problem.prompt,
-                difficulty=problem.difficulty,
-                function_name=problem.function_name,
-                starter_code=problem.starter_code,
-                example_cases=[
-                    {
-                        "input": json.loads(example_case.input_json),
-                        "expected": json.loads(example_case.expected_json),
-                    }
-                    for example_case in problem.example_cases
-                ],
-                source=problem.source,
-            )
-            for problem in problems
-        ]
-    )
+    return ProblemListResponse(problems=[_serialize_problem(problem, viewer=user) for problem in problems])
 
 
 def _execute_code(
@@ -199,22 +321,15 @@ def _execute_code(
     user: User,
     db: Session,
 ) -> SubmissionResponse:
-    problem = (
-        db.query(Problem)
-        .options(selectinload(Problem.test_cases), selectinload(Problem.answer_key), selectinload(Problem.hints))
-        .filter(Problem.problem_id == payload.problem_id)
-        .first()
-    )
-    if problem is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
-
-    progress = progress_service.get_or_create(db, user=user, problem=problem)
+    problem = _get_visible_problem(payload.problem_id, db)
     test_cases = [(json.loads(case.input_json), json.loads(case.expected_json)) for case in problem.test_cases]
     evaluation = evaluation_service.evaluate(
         code=payload.code,
         function_name=problem.function_name,
         test_cases=test_cases,
     )
+
+    progress = progress_service.get_or_create(db, user=user, problem=problem)
     # Only official Submit executions are allowed to change hint/answer-key progression.
     progress_service.apply_submission_outcome(
         progress=progress,
@@ -285,7 +400,6 @@ def submit_code_legacy(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SubmissionResponse:
-    # Backward-compatible alias for existing clients while the UI moves to /submit.
     return _execute_code(execution_type="Submit", payload=payload, user=user, db=db)
 
 
@@ -296,7 +410,7 @@ def get_hints(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HintResponse:
-    problem = db.query(Problem).filter(Problem.problem_id == problem_id).first()
+    problem = db.query(Problem).filter(Problem.problem_id == problem_id, Problem.is_deleted.is_(False)).first()
     if problem is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
 
@@ -318,17 +432,8 @@ def get_hints(
         .first()
     )
 
-    context = HintContext(
-        problem=problem,
-        progress=progress,
-        latest_submission=latest_submission,
-    )
-
-    cached_hints = (
-        db.query(GeneratedHint)
-        .filter(GeneratedHint.user_id == user.id, GeneratedHint.problem_id == problem.id)
-        .all()
-    )
+    context = HintContext(problem=problem, progress=progress, latest_submission=latest_submission)
+    cached_hints = db.query(GeneratedHint).filter(GeneratedHint.user_id == user.id, GeneratedHint.problem_id == problem.id).all()
     generated_hints = hint_service.get_cached_hints(
         cached_hints=cached_hints,
         unlocked_stages=unlocked_stages,
@@ -372,7 +477,7 @@ def get_answer_key(
     problem = (
         db.query(Problem)
         .options(selectinload(Problem.answer_key))
-        .filter(Problem.problem_id == problem_id)
+        .filter(Problem.problem_id == problem_id, Problem.is_deleted.is_(False))
         .first()
     )
     if problem is None:
@@ -382,18 +487,91 @@ def get_answer_key(
 
     progress = progress_service.get_or_create(db, user=user, problem=problem)
     if not progress.answer_key_unlocked:
-        return AnswerKeyResponse(
-            problem_id=problem.problem_id,
-            unlocked=False,
-            solution_code=None,
-            explanation=None,
-        )
+        return AnswerKeyResponse(problem_id=problem.problem_id, unlocked=False, solution_code=None, explanation=None)
 
     return AnswerKeyResponse(
         problem_id=problem.problem_id,
         unlocked=True,
         solution_code=problem.answer_key.solution_code,
         explanation=problem.answer_key.explanation,
+    )
+
+
+@app.get("/author/problems", response_model=AuthorProblemListResponse)
+def list_author_dashboard_problems(
+    source: str = Query(default="all", pattern="^(all|starter|author)$"),
+    include_deleted: bool = False,
+    user: User = Depends(require_author),
+    db: Session = Depends(get_db),
+) -> AuthorProblemListResponse:
+    query = db.query(Problem).options(selectinload(Problem.example_cases), selectinload(Problem.author))
+    if not include_deleted:
+        query = query.filter(Problem.is_deleted.is_(False))
+
+    if source == "starter":
+        query = query.filter(Problem.source == "starter")
+    elif source == "author":
+        query = query.filter(Problem.source == "author", Problem.author_id == user.id)
+    else:
+        query = query.filter(or_(Problem.source == "starter", Problem.author_id == user.id))
+
+    problems = query.order_by(Problem.source, Problem.difficulty, Problem.title).all()
+    return AuthorProblemListResponse(problems=[_serialize_problem(problem, viewer=user) for problem in problems])
+
+
+@app.get("/author/problems/{problem_id}", response_model=ProblemUploadPayload)
+def get_author_problem(
+    problem_id: str,
+    user: User = Depends(require_author),
+    db: Session = Depends(get_db),
+) -> ProblemUploadPayload:
+    problem = (
+        db.query(Problem)
+        .options(
+            selectinload(Problem.example_cases),
+            selectinload(Problem.test_cases),
+            selectinload(Problem.hints),
+            selectinload(Problem.answer_key),
+        )
+        .filter(Problem.problem_id == problem_id)
+        .first()
+    )
+    if problem is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
+    if problem.source == "starter" or problem.author_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You may only view editable payloads for your own uploaded problems.")
+
+    hints = {str(hint.stage): hint.content for hint in sorted(problem.hints, key=lambda item: item.stage)}
+    return ProblemUploadPayload(
+        problem_id=problem.problem_id,
+        title=problem.title,
+        prompt=problem.prompt,
+        difficulty=problem.difficulty,
+        function_name=problem.function_name,
+        starter_code=problem.starter_code,
+        example_cases=[
+            {
+                "input": json.loads(example_case.input_json),
+                "expected": json.loads(example_case.expected_json),
+            }
+            for example_case in problem.example_cases
+        ],
+        test_cases=[
+            {
+                "input": json.loads(test_case.input_json),
+                "expected": json.loads(test_case.expected_json),
+            }
+            for test_case in problem.test_cases
+        ],
+        hints=hints or None,
+        answer_key=(
+            {
+                "solution_code": problem.answer_key.solution_code,
+                "explanation": problem.answer_key.explanation,
+            }
+            if problem.answer_key is not None
+            else None
+        ),
     )
 
 
@@ -413,6 +591,96 @@ def upload_problem(
     return ProblemUploadResponse(success=True, problem_id=payload.problem_id)
 
 
+@app.post("/author/problems/upload-file", response_model=ProblemUploadResponse)
+async def upload_problem_file(
+    file: UploadFile = File(...),
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(require_author),
+    db: Session = Depends(get_db),
+) -> ProblemUploadResponse:
+    if not file.filename or not file.filename.lower().endswith(".json"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please upload a single .json problem file.")
+
+    try:
+        raw = (await file.read()).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Problem file must be valid UTF-8 JSON.") from exc
+
+    try:
+        payload = ProblemUploadPayload.model_validate(json.loads(raw))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Uploaded file is not valid JSON: {exc.msg}.") from exc
+
+    existing = db.query(Problem).filter(Problem.problem_id == payload.problem_id).first()
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Duplicate problem_id.")
+
+    persist_problem(db=db, payload=payload, source="author", author_id=user.id)
+    db.commit()
+    return ProblemUploadResponse(success=True, problem_id=payload.problem_id)
+
+
+@app.put("/author/problems/{problem_id}", response_model=ProblemUpdateResponse)
+def update_problem(
+    problem_id: str,
+    payload: ProblemUploadPayload,
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(require_author),
+    db: Session = Depends(get_db),
+) -> ProblemUpdateResponse:
+    if payload.problem_id != problem_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="problem_id in the payload must match the selected problem.")
+
+    problem = _get_manageable_problem(problem_id, user=user, db=db)
+    replace_problem_contents(db=db, problem=problem, payload=payload)
+    db.commit()
+    db.refresh(problem)
+    return ProblemUpdateResponse(success=True, problem_id=problem.problem_id, is_active=problem.is_active, is_deleted=problem.is_deleted)
+
+
+@app.post("/author/problems/{problem_id}/disable", response_model=ProblemUpdateResponse)
+def disable_problem(
+    problem_id: str,
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(require_author),
+    db: Session = Depends(get_db),
+) -> ProblemUpdateResponse:
+    problem = _get_manageable_problem(problem_id, user=user, db=db)
+    problem.is_active = False
+    db.commit()
+    db.refresh(problem)
+    return ProblemUpdateResponse(success=True, problem_id=problem.problem_id, is_active=problem.is_active, is_deleted=problem.is_deleted)
+
+
+@app.post("/author/problems/{problem_id}/enable", response_model=ProblemUpdateResponse)
+def enable_problem(
+    problem_id: str,
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(require_author),
+    db: Session = Depends(get_db),
+) -> ProblemUpdateResponse:
+    problem = _get_manageable_problem(problem_id, user=user, db=db)
+    problem.is_active = True
+    db.commit()
+    db.refresh(problem)
+    return ProblemUpdateResponse(success=True, problem_id=problem.problem_id, is_active=problem.is_active, is_deleted=problem.is_deleted)
+
+
+@app.delete("/author/problems/{problem_id}", response_model=ProblemUpdateResponse)
+def delete_problem(
+    problem_id: str,
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(require_author),
+    db: Session = Depends(get_db),
+) -> ProblemUpdateResponse:
+    problem = _get_manageable_problem(problem_id, user=user, db=db)
+    problem.is_active = False
+    problem.is_deleted = True
+    db.commit()
+    db.refresh(problem)
+    return ProblemUpdateResponse(success=True, problem_id=problem.problem_id, is_active=problem.is_active, is_deleted=problem.is_deleted)
+
+
 @app.delete("/progress/{problem_id}", response_model=ResetProgressResponse)
 def reset_problem_progress(
     problem_id: str,
@@ -420,7 +688,7 @@ def reset_problem_progress(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ResetProgressResponse:
-    problem = db.query(Problem).filter(Problem.problem_id == problem_id).first()
+    problem = db.query(Problem).filter(Problem.problem_id == problem_id, Problem.is_deleted.is_(False)).first()
     if problem is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
 
