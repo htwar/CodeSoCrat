@@ -21,6 +21,8 @@ class RateLimitRule:
 
 class RateLimiter:
     def __init__(self) -> None:
+        # In-memory buckets are enough for the class project deployment and keep
+        # the limiter simple to reason about locally.
         self._buckets: dict[str, deque[float]] = defaultdict(deque)
         self._lock = Lock()
 
@@ -44,6 +46,8 @@ rate_limiter = RateLimiter()
 
 
 def _get_client_ip(request: Request) -> str:
+    # Respect proxy headers first so rate limiting still works behind a reverse
+    # proxy such as Caddy or Nginx.
     forwarded_for = request.headers.get("x-forwarded-for", "")
     if forwarded_for:
         return forwarded_for.split(",")[0].strip() or "unknown"
@@ -51,6 +55,8 @@ def _get_client_ip(request: Request) -> str:
 
 
 def _get_user_identifier(request: Request) -> Optional[str]:
+    # Prefer the current session cookie, but support bearer tokens for testing
+    # and future API clients.
     authorization = request.headers.get("authorization", "")
     token = None
     if authorization.startswith("Bearer "):
@@ -67,6 +73,8 @@ def _get_user_identifier(request: Request) -> Optional[str]:
 
 
 def enforce_rate_limit(request: Request) -> None:
+    # Login gets its own tighter limit, while general traffic uses broader IP
+    # and per-user quotas.
     path = request.url.path
     ip_address = _get_client_ip(request)
     user_id = _get_user_identifier(request)
@@ -86,4 +94,6 @@ def enforce_rate_limit(request: Request) -> None:
 
 
 def enforce_login_identity_rate_limit(identity: str) -> None:
+    # Repeated guesses against one email should slow down even if they come from
+    # different IP addresses.
     rate_limiter.enforce(identity.lower(), RateLimitRule(settings.login_rate_limit_user, settings.rate_limit_window_seconds, "login-user"))

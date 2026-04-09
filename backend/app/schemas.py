@@ -13,6 +13,8 @@ DIFFICULTIES = {"Easy", "Medium", "Hard"}
 PROBLEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
+# Pydantic request/response models keep the API strict and provide friendly
+# validation errors for login, submissions, and author uploads.
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

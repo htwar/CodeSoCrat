@@ -33,6 +33,8 @@ class EvaluationResult:
 
 class DockerSandboxExecutor:
     def run(self, *, code: str, function_name: str, test_cases: list[tuple[list, object]]) -> EvaluationResult:
+        # Fast preflight checks make local setup issues easier to explain before
+        # we attempt to run student code in the container.
         availability_error = self._check_docker_availability()
         if availability_error is not None:
             return availability_error
@@ -75,6 +77,8 @@ class DockerSandboxExecutor:
         return self._classify_container_result(completed=completed, runtime_ms=runtime_ms)
 
     def _build_docker_command(self, sandbox_dir: Path) -> list[str]:
+        # The container is locked down to keep evaluation isolated and
+        # deterministic across submissions.
         memory_mb = f"{self._memory_limit_mb()}m"
         return [
             "docker",
@@ -108,6 +112,8 @@ class DockerSandboxExecutor:
         ]
 
     def _check_docker_availability(self) -> Optional[EvaluationResult]:
+        # Separate Docker startup problems from user-code failures so the UI can
+        # explain environment issues more clearly.
         try:
             info = subprocess.run(
                 ["docker", "info"],
@@ -167,6 +173,8 @@ class DockerSandboxExecutor:
         return None
 
     def _ensure_docker_image(self) -> Optional[str]:
+        # Pull the sandbox image automatically in development when it is
+        # missing, unless auto-pull has been disabled.
         if not settings.docker_auto_pull:
             return f"Docker image '{settings.docker_image}' is not available locally. Run: docker pull {settings.docker_image}"
 
@@ -190,6 +198,8 @@ class DockerSandboxExecutor:
         return combined or f"Docker image '{settings.docker_image}' is not available locally and could not be pulled automatically."
 
     def _classify_container_result(self, *, completed: subprocess.CompletedProcess[str], runtime_ms: int) -> EvaluationResult:
+        # Translate raw container stdout/stderr into the normalized result
+        # shape the rest of the app understands.
         stdout = (completed.stdout or "").strip()
         stderr = (completed.stderr or "").strip()
 
@@ -264,6 +274,8 @@ class DockerSandboxExecutor:
         )
 
     def _build_runner_script(self, *, code: str, function_name: str, test_cases: list[tuple[list, object]]) -> str:
+        # Build a tiny one-off script so the sandbox only needs Python plus the
+        # submitted function and serialized test cases.
         serialized_cases = json.dumps(test_cases)
         return "\n".join(
             [
@@ -294,14 +306,19 @@ class DockerSandboxExecutor:
         )
 
     def _memory_limit_mb(self) -> int:
+        # Convert the configured byte limit into the megabyte value Docker
+        # expects on the command line.
         return int(settings.evaluation_memory_bytes / (1024 * 1024))
 
 
 class EvaluationService:
     def __init__(self, executor: Optional[DockerSandboxExecutor] = None):
+        # Allow tests to inject a fake executor while production uses Docker.
         self.executor = executor or DockerSandboxExecutor()
 
     def evaluate(self, *, code: str, function_name: str, test_cases: list[tuple[list, object]]) -> EvaluationResult:
+        # Cheap syntax/name checks give immediate feedback without waiting on
+        # Docker when the submission is obviously incomplete.
         syntax_error = self._check_syntax(code)
         if syntax_error:
             return EvaluationResult(
@@ -329,6 +346,7 @@ class EvaluationService:
         return self.executor.run(code=code, function_name=function_name, test_cases=test_cases)
 
     def _check_syntax(self, code: str) -> Optional[str]:
+        # Catch parse errors before spending time on sandbox execution.
         try:
             ast.parse(code)
         except SyntaxError as exc:
@@ -337,12 +355,15 @@ class EvaluationService:
 
     def _check_required_function(self, code: str, function_name: str) -> Optional[str]:
         tree = ast.parse(code)
+        # Accept extra helper functions, but require the named entry point the
+        # problem expects for automated evaluation.
         functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
         if function_name not in functions:
             return f"Required function '{function_name}' is missing or misnamed."
         return None
 
     def _extract_error_line_number(self, feedback: str) -> Optional[int]:
+        # Pull a line number back out of the formatted syntax message.
         prefix = "Syntax error on line "
         if not feedback.startswith(prefix):
             return None
@@ -353,6 +374,8 @@ class EvaluationService:
             return None
 
     def _extract_error_excerpt(self, code: str, line_number: Optional[int]) -> Optional[str]:
+        # Return the exact source line that triggered the syntax error, when
+        # one is available for hint generation and UI display.
         if line_number is None:
             return None
         lines = code.splitlines()

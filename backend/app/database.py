@@ -16,6 +16,8 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expi
 
 
 def get_db():
+    # FastAPI dependency that opens one SQLAlchemy session per request and
+    # guarantees cleanup afterward.
     db = SessionLocal()
     try:
         yield db
@@ -23,6 +25,8 @@ def get_db():
         db.close()
 
 
+# Apply lightweight schema evolution for local SQLite databases created by
+# earlier project versions so new fields can be used without manual migrations.
 def ensure_schema_evolution() -> None:
     inspector = inspect(engine)
     table_names = inspector.get_table_names()

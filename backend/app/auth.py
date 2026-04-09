@@ -19,17 +19,23 @@ from app.models import User
 security = HTTPBearer(auto_error=False)
 
 
+# Local password auth is intentionally simple for this project, while Google
+# auth is layered on top using the same signed session cookie model.
 def hash_password(password: str) -> str:
+    # Convert a plaintext password into the stored hash format used in the DB.
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
 def verify_password(password: str, password_hash: Optional[str]) -> bool:
+    # Compare an incoming password against the stored hash safely.
     if not password_hash:
         return False
     return hmac.compare_digest(hash_password(password), password_hash)
 
 
 def _decode_jwt_without_verification(token: str) -> dict:
+    # Read the Google JWT payload quickly so basic claim checks can happen
+    # before the token is verified against Google's endpoint.
     try:
         _header, payload, _signature = token.split(".", 2)
         padded = payload + "=" * (-len(payload) % 4)
@@ -40,6 +46,8 @@ def _decode_jwt_without_verification(token: str) -> dict:
 
 
 def verify_google_id_token(token: str) -> dict:
+    # Validate the Google credential both locally and through Google's
+    # tokeninfo endpoint before trusting it for sign-in.
     if not settings.google_client_id:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -75,7 +83,10 @@ def verify_google_id_token(token: str) -> dict:
     return verified
 
 
+# Session tokens store the user id and role so the backend can restore the
+# current user without a server-side session table.
 def create_token(user: User) -> str:
+    # Build the signed session token that is stored in the session cookie.
     payload = f"{user.id}:{user.role}"
     signature = hmac.new(settings.secret_key_current.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     raw = f"{payload}:{signature}"
@@ -83,6 +94,8 @@ def create_token(user: User) -> str:
 
 
 def decode_token(token: str) -> tuple[int, str]:
+    # Decode and verify a session token, supporting key rotation through
+    # current and previous secret keys.
     try:
         decoded = base64.urlsafe_b64decode(token.encode("utf-8")).decode("utf-8")
         user_id_str, role, signature = decoded.split(":", 2)
@@ -103,6 +116,8 @@ def decode_token(token: str) -> tuple[int, str]:
 
 
 def try_decode_token(token: str) -> Optional[tuple[int, str]]:
+    # Lightweight helper for callers that want "invalid token" to become None
+    # instead of an exception.
     try:
         return decode_token(token)
     except HTTPException:
@@ -110,6 +125,8 @@ def try_decode_token(token: str) -> Optional[tuple[int, str]]:
 
 
 def create_csrf_token(session_token: str) -> str:
+    # Tie the CSRF token to the current session cookie so state-changing
+    # requests can be verified without server-side storage.
     signature = hmac.new(
         settings.secret_key_current.encode("utf-8"),
         session_token.encode("utf-8"),
@@ -120,6 +137,7 @@ def create_csrf_token(session_token: str) -> str:
 
 
 def verify_csrf_token(session_token: str, csrf_token: str) -> bool:
+    # Confirm the CSRF cookie was generated from this exact session token.
     try:
         decoded = base64.urlsafe_b64decode(csrf_token.encode("utf-8")).decode("utf-8")
         token_value, signature = decoded.rsplit(":", 1)
@@ -143,6 +161,8 @@ def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
+    # Resolve the authenticated user from either a bearer token or the signed
+    # session cookie attached by the browser.
     token: Optional[str] = None
     if credentials is not None:
         token = credentials.credentials
@@ -163,6 +183,8 @@ def require_csrf(
     request: Request,
     csrf_header: Optional[str] = Header(default=None, alias="X-CSRF-Token"),
 ) -> None:
+    # Guard POST/PUT/DELETE routes so only pages that hold the matching CSRF
+    # cookie can submit state-changing requests.
     session_token = request.cookies.get(settings.session_cookie_name)
     csrf_cookie = request.cookies.get(settings.csrf_cookie_name)
     if not session_token:
@@ -176,6 +198,7 @@ def require_csrf(
 
 
 def require_author(user: User = Depends(get_current_user)) -> User:
+    # Reuse the current-user dependency, then enforce the elevated author role.
     if user.role != "Author":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Author role required.")
     return user
