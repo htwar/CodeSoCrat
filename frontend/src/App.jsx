@@ -69,6 +69,7 @@ const WORKSPACE_STORAGE_PREFIX = "codesocrat_workspace_v1";
 
 function formatSeconds(totalSeconds) {
   // Convert raw countdown seconds into an MM:SS string for the timer UI.
+  // Convert raw countdown seconds into an MM:SS string for the timer UI.
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
@@ -76,10 +77,13 @@ function formatSeconds(totalSeconds) {
 
 function getWorkspaceStorageKey(userId) {
   // Keep each signed-in user's saved editor/timer state isolated in localStorage.
+  // Keep each signed-in user's saved editor/timer state isolated in localStorage.
   return `${WORKSPACE_STORAGE_PREFIX}:${userId}`;
 }
 
 function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, loading, error }) {
+  // Authentication screen shared by local login, registration, and optional
+  // Google sign-in.
   // Authentication screen shared by local login, registration, and optional
   // Google sign-in.
   const [mode, setMode] = useState("login");
@@ -109,6 +113,7 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
 
   function handleSubmit(event) {
     // Submit either login or registration based on the active auth tab.
+    // Submit either login or registration based on the active auth tab.
     event.preventDefault();
     if (mode === "register") {
       onRegister({ email, password, confirm_password: confirmPassword });
@@ -128,10 +133,13 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
         <button
           type="button"
           id="auth-tab-login"
+          id="auth-tab-login"
           className={mode === "login" ? "toggle-button active" : "toggle-button"}
           onClick={() => setMode("login")}
           role="tab"
           aria-selected={mode === "login"}
+          aria-controls="auth-form-panel"
+          tabIndex={mode === "login" ? 0 : -1}
           aria-controls="auth-form-panel"
           tabIndex={mode === "login" ? 0 : -1}
         >
@@ -140,16 +148,20 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
         <button
           type="button"
           id="auth-tab-register"
+          id="auth-tab-register"
           className={mode === "register" ? "toggle-button active" : "toggle-button"}
           onClick={() => setMode("register")}
           role="tab"
           aria-selected={mode === "register"}
           aria-controls="auth-form-panel"
           tabIndex={mode === "register" ? 0 : -1}
+          aria-controls="auth-form-panel"
+          tabIndex={mode === "register" ? 0 : -1}
         >
           Create account
         </button>
       </div>
+      <form className="auth-form" id="auth-form-panel" onSubmit={handleSubmit}>
       <form className="auth-form" id="auth-form-panel" onSubmit={handleSubmit}>
         <label htmlFor="auth-email">Email</label>
         <input
@@ -197,6 +209,7 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
         <p className="meta-copy">Google sign-in becomes available after `CODESOCRAT_GOOGLE_CLIENT_ID` is configured.</p>
       )}
       <p className="status-text" role="status" aria-live="polite">
+      <p className="status-text" role="status" aria-live="polite">
         {error || ""}
       </p>
       <div className="account-hints">
@@ -209,11 +222,14 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
 
 function ProblemList({ problems, selectedDifficulty, selectedProblemId, onDifficultyChange, onSelect }) {
   // Left-hand catalog used to switch between available coding problems.
+  // Left-hand catalog used to switch between available coding problems.
   return (
+    <aside className="panel problem-list" aria-labelledby="problem-list-title">
     <aside className="panel problem-list" aria-labelledby="problem-list-title">
       <div className="panel-header">
         <div>
           <p className="eyebrow">Problem Set</p>
+          <h2 id="problem-list-title">Choose a challenge</h2>
           <h2 id="problem-list-title">Choose a challenge</h2>
         </div>
       </div>
@@ -223,10 +239,13 @@ function ProblemList({ problems, selectedDifficulty, selectedProblemId, onDiffic
             key={difficulty}
             type="button"
             id={`difficulty-tab-${difficulty}`}
+            id={`difficulty-tab-${difficulty}`}
             className={selectedDifficulty === difficulty ? "difficulty-chip active" : "difficulty-chip"}
             onClick={() => onDifficultyChange(difficulty)}
             role="tab"
             aria-selected={selectedDifficulty === difficulty}
+            aria-controls="workspace-panel"
+            tabIndex={selectedDifficulty === difficulty ? 0 : -1}
             aria-controls="workspace-panel"
             tabIndex={selectedDifficulty === difficulty ? 0 : -1}
           >
@@ -273,7 +292,10 @@ function SubmissionPanel({
 }) {
   // Main learner workspace: prompt, timer, code editor, run/submit actions,
   // and the latest result state.
+  // Main learner workspace: prompt, timer, code editor, run/submit actions,
+  // and the latest result state.
   const editorOptions = {
+    ariaLabel: problem ? `${problem.title} Python editor` : "Python editor",
     ariaLabel: problem ? `${problem.title} Python editor` : "Python editor",
     automaticLayout: true,
     fontSize: 15,
@@ -299,6 +321,7 @@ function SubmissionPanel({
 
   return (
     <section className="workspace-grid">
+      <div className="panel workspace-panel" id="workspace-panel" tabIndex="-1" aria-labelledby="workspace-problem-title">
       <div className="panel workspace-panel" id="workspace-panel" tabIndex="-1" aria-labelledby="workspace-problem-title">
         <div className="panel-header">
           <div className="workspace-heading">
@@ -435,14 +458,19 @@ function SubmissionPanel({
           </button>
         </div>
         {timedChallenge.message ? <p className="success-text" role="status" aria-live="polite">{timedChallenge.message}</p> : null}
+        {timedChallenge.message ? <p className="success-text" role="status" aria-live="polite">{timedChallenge.message}</p> : null}
         {timedChallenge.status === "expiring" ? (
+          <p className="meta-copy" role="status" aria-live="polite">Auto-submitting your timed attempt now.</p>
           <p className="meta-copy" role="status" aria-live="polite">Auto-submitting your timed attempt now.</p>
         ) : null}
         {timedChallenge.status === "expired" ? (
           <p className="error-text" role="alert">Time expired. Your current code was submitted automatically, and further submissions are locked until you clear timed mode.</p>
+          <p className="error-text" role="alert">Time expired. Your current code was submitted automatically, and further submissions are locked until you clear timed mode.</p>
         ) : null}
         {submissionState.error ? <p className="error-text" role="alert">{submissionState.error}</p> : null}
+        {submissionState.error ? <p className="error-text" role="alert">{submissionState.error}</p> : null}
         {submissionState.result ? (
+          <div className={submissionState.result.result === "Pass" ? "result-card pass" : "result-card fail"} role="status" aria-live="polite">
           <div className={submissionState.result.result === "Pass" ? "result-card pass" : "result-card fail"} role="status" aria-live="polite">
             <h3>{submissionState.result.result}</h3>
             <p>{submissionState.result.feedback}</p>
@@ -458,12 +486,15 @@ function SubmissionPanel({
       </div>
 
       <div className="panel hints-panel" aria-labelledby="hints-panel-title">
+      <div className="panel hints-panel" aria-labelledby="hints-panel-title">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Feedback</p>
             <h2 id="hints-panel-title">Hints</h2>
+            <h2 id="hints-panel-title">Hints</h2>
           </div>
         </div>
+        {hintState.error ? <p className="error-text" role="alert">{hintState.error}</p> : null}
         {hintState.error ? <p className="error-text" role="alert">{hintState.error}</p> : null}
         <HintCard title="Conceptual" stage={1} hintState={hintState} onUnlockHint={onUnlockHint} />
         <HintCard title="Strategic" stage={2} hintState={hintState} onUnlockHint={onUnlockHint} />
@@ -476,6 +507,7 @@ function SubmissionPanel({
 
 function HintCard({ title, stage, hintState, onUnlockHint }) {
   // Reusable card for one hint tier, including unlock/reveal behavior.
+  // Reusable card for one hint tier, including unlock/reveal behavior.
   const hints = hintState.hints || {};
   const stageKey = stage === 1 ? "conceptual" : stage === 2 ? "strategic" : "syntactic";
   const content = hints[stageKey];
@@ -485,6 +517,7 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
   const isLoading = hintState.loadingStage === stage;
 
   return (
+    <article className={["hint-card", content ? "unlocked" : "locked", isHighlighted ? "highlighted" : ""].join(" ").trim()} aria-live={content ? "polite" : "off"}>
     <article className={["hint-card", content ? "unlocked" : "locked", isHighlighted ? "highlighted" : ""].join(" ").trim()} aria-live={content ? "polite" : "off"}>
       <h3>{title}</h3>
       <p>
@@ -505,10 +538,12 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
 
 function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
   // Final help panel that reveals the stored solution only after unlock.
+  // Final help panel that reveals the stored solution only after unlock.
   const isUnlocked = answerKeyState.unlocked;
   const hasContent = Boolean(answerKeyState.content);
 
   return (
+    <article className={["hint-card", hasContent ? "unlocked" : "locked", isUnlocked ? "highlighted" : ""].join(" ").trim()} aria-live={hasContent ? "polite" : "off"}>
     <article className={["hint-card", hasContent ? "unlocked" : "locked", isUnlocked ? "highlighted" : ""].join(" ").trim()} aria-live={hasContent ? "polite" : "off"}>
       <h3>Answer Key</h3>
       {hasContent ? (
@@ -520,6 +555,7 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
               language="python"
               value={answerKeyState.content.solution_code}
               options={{
+                ariaLabel: "Reference solution code viewer",
                 ariaLabel: "Reference solution code viewer",
                 automaticLayout: true,
                 fontSize: 14,
@@ -542,6 +578,7 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
             : "Locked until you reach three valid failed Submit attempts on this problem."}
         </p>
       )}
+      {answerKeyState.error ? <p className="error-text" role="alert">{answerKeyState.error}</p> : null}
       {answerKeyState.error ? <p className="error-text" role="alert">{answerKeyState.error}</p> : null}
       {isUnlocked && !hasContent ? (
         <button type="button" className="secondary-button" onClick={onViewAnswerKey} disabled={answerKeyState.loading}>
@@ -570,9 +607,12 @@ function AuthorPanel({
 }) {
   // Author-only dashboard for browsing starter/custom problems and editing
   // custom JSON payloads.
+  // Author-only dashboard for browsing starter/custom problems and editing
+  // custom JSON payloads.
   const loadFileInputRef = useRef(null);
   const uploadFileInputRef = useRef(null);
   const authorEditorOptions = {
+    ariaLabel: "Problem JSON editor",
     ariaLabel: "Problem JSON editor",
     automaticLayout: true,
     fontSize: 14,
@@ -589,9 +629,12 @@ function AuthorPanel({
   return (
     <section className="author-layout" aria-label="Author dashboard">
       <section className="panel author-panel" aria-labelledby="author-library-title">
+    <section className="author-layout" aria-label="Author dashboard">
+      <section className="panel author-panel" aria-labelledby="author-library-title">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Author Dashboard</p>
+            <h2 id="author-library-title">Manage problem library</h2>
             <h2 id="author-library-title">Manage problem library</h2>
           </div>
           <button type="button" className="secondary-button" onClick={onCreateNew}>
@@ -604,10 +647,13 @@ function AuthorPanel({
               key={filterItem.id}
               type="button"
               id={`author-filter-${filterItem.id}`}
+              id={`author-filter-${filterItem.id}`}
               className={authorFilter === filterItem.id ? "difficulty-chip active" : "difficulty-chip"}
               onClick={() => onAuthorFilterChange(filterItem.id)}
               role="tab"
               aria-selected={authorFilter === filterItem.id}
+              aria-controls="author-problem-list"
+              tabIndex={authorFilter === filterItem.id ? 0 : -1}
               aria-controls="author-problem-list"
               tabIndex={authorFilter === filterItem.id ? 0 : -1}
             >
@@ -615,6 +661,7 @@ function AuthorPanel({
             </button>
           ))}
         </div>
+        <div className="problem-items" id="author-problem-list">
         <div className="problem-items" id="author-problem-list">
           {authorProblems.map((problem) => (
             <article key={problem.problem_id} className="author-problem-card">
@@ -657,9 +704,11 @@ function AuthorPanel({
       </section>
 
       <section className="panel author-panel" aria-labelledby="author-workspace-title">
+      <section className="panel author-panel" aria-labelledby="author-workspace-title">
         <div className="panel-header">
           <div>
             <p className="eyebrow">JSON Workspace</p>
+            <h2 id="author-workspace-title">{authorEditor.mode === "edit" ? `Editing ${authorEditor.problemId}` : "Upload one problem JSON file"}</h2>
             <h2 id="author-workspace-title">{authorEditor.mode === "edit" ? `Editing ${authorEditor.problemId}` : "Upload one problem JSON file"}</h2>
           </div>
         </div>
@@ -732,6 +781,7 @@ function AuthorPanel({
 
 function loadGoogleScriptOnce() {
   // Inject Google Identity Services once, then reuse the loaded script.
+  // Inject Google Identity Services once, then reuse the loaded script.
   return new Promise((resolve, reject) => {
     if (window.google?.accounts?.id) {
       resolve();
@@ -757,6 +807,8 @@ function loadGoogleScriptOnce() {
 }
 
 export default function App() {
+  // Top-level coordinator for auth, problem browsing, timed mode, hints,
+  // author tools, and persisted workspace state.
   // Top-level coordinator for auth, problem browsing, timed mode, hints,
   // author tools, and persisted workspace state.
   const [session, setSession] = useState(null);
@@ -787,6 +839,8 @@ export default function App() {
 
   // Keep refs aligned with the latest session and code so timer-triggered
   // submissions always use the newest in-memory values.
+  // Keep refs aligned with the latest session and code so timer-triggered
+  // submissions always use the newest in-memory values.
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
@@ -795,6 +849,8 @@ export default function App() {
     codeByProblemRef.current = codeByProblem;
   }, [codeByProblem]);
 
+  // Restore the saved workspace for this user after refresh, including draft
+  // code and any timed challenge that was already in progress.
   // Restore the saved workspace for this user after refresh, including draft
   // code and any timed challenge that was already in progress.
   useEffect(() => {
@@ -845,6 +901,8 @@ export default function App() {
 
   // Persist draft code and timer state per signed-in user so a page reload does
   // not wipe out work in progress.
+  // Persist draft code and timer state per signed-in user so a page reload does
+  // not wipe out work in progress.
   useEffect(() => {
     if (!session?.user_id || typeof window === "undefined") {
       return;
@@ -857,6 +915,8 @@ export default function App() {
     window.localStorage.setItem(getWorkspaceStorageKey(session.user_id), payload);
   }, [session?.user_id, codeByProblem, timedChallengeByProblem]);
 
+  // Load Google auth configuration once so the login screen knows whether the
+  // Google sign-in button should be rendered.
   // Load Google auth configuration once so the login screen knows whether the
   // Google sign-in button should be rendered.
   useEffect(() => {
@@ -887,6 +947,8 @@ export default function App() {
 
   // Restore an existing cookie session before showing either the auth screen or
   // the workspace.
+  // Restore an existing cookie session before showing either the auth screen or
+  // the workspace.
   useEffect(() => {
     let isActive = true;
 
@@ -913,6 +975,7 @@ export default function App() {
     };
   }, []);
 
+  // Refresh the visible problem list whenever the user changes difficulty.
   // Refresh the visible problem list whenever the user changes difficulty.
   useEffect(() => {
     if (!session) {
@@ -958,6 +1021,8 @@ export default function App() {
     };
   }, [session, selectedDifficulty]);
 
+  // Author users get a management dashboard alongside the student workspace,
+  // so their problem list is loaded separately.
   // Author users get a management dashboard alongside the student workspace,
   // so their problem list is loaded separately.
   useEffect(() => {
@@ -1008,6 +1073,8 @@ export default function App() {
 
   // Drive the active countdown timers and mark any timer that reaches zero so
   // it can auto-submit on the next effect pass.
+  // Drive the active countdown timers and mark any timer that reaches zero so
+  // it can auto-submit on the next effect pass.
   useEffect(() => {
     const hasRunningTimer = Object.values(timedChallengeByProblem).some((challenge) => challenge.status === "running");
     if (!hasRunningTimer) {
@@ -1052,6 +1119,7 @@ export default function App() {
   }, [timedChallengeByProblem]);
 
   // Auto-submit any timed problem whose countdown has just expired.
+  // Auto-submit any timed problem whose countdown has just expired.
   useEffect(() => {
     const expiringProblemIds = Object.entries(timedChallengeByProblem)
       .filter(([, challenge]) => challenge.status === "expiring")
@@ -1094,6 +1162,8 @@ export default function App() {
 
   // Build the default timer state for a problem using its difficulty-specific
   // time limit.
+  // Build the default timer state for a problem using its difficulty-specific
+  // time limit.
   function buildTimedChallenge(problem, overrides = {}) {
     const limitSeconds = TIME_LIMITS[problem.difficulty] || TIME_LIMITS.Easy;
     return {
@@ -1110,6 +1180,7 @@ export default function App() {
 
   function resetAuthorEditor(nextJson = starterUploadTemplate) {
     // Reset the author JSON workspace back to "new upload" mode.
+    // Reset the author JSON workspace back to "new upload" mode.
     setAuthorEditor({
       mode: "create",
       problemId: "",
@@ -1123,6 +1194,8 @@ export default function App() {
   async function refreshProblemCollections() {
     // Refresh both the learner list and, for authors, the dashboard list after
     // uploads, edits, enables, disables, or deletes.
+    // Refresh both the learner list and, for authors, the dashboard list after
+    // uploads, edits, enables, disables, or deletes.
     const response = await getProblems(selectedDifficulty);
     setProblems(response.problems);
     if (session?.role === "Author") {
@@ -1132,6 +1205,7 @@ export default function App() {
   }
 
   function setTimedChallenge(problemId, updater) {
+    // Update one problem's timer state without overwriting timers for others.
     // Update one problem's timer state without overwriting timers for others.
     setTimedChallengeByProblem((current) => {
       const currentChallenge = current[problemId];
@@ -1144,6 +1218,7 @@ export default function App() {
   }
 
   async function handleLogin(credentials) {
+    // Submit the login form and store the returned session payload.
     // Submit the login form and store the returned session payload.
     setAuthLoading(true);
     setAuthError("");
@@ -1159,6 +1234,7 @@ export default function App() {
 
   async function handleRegister(credentials) {
     // Submit the registration form and sign the new user in.
+    // Submit the registration form and sign the new user in.
     setAuthLoading(true);
     setAuthError("");
     try {
@@ -1173,6 +1249,7 @@ export default function App() {
 
   async function handleGoogleCredential(credential) {
     // Exchange the Google credential token for the app's own session cookie.
+    // Exchange the Google credential token for the app's own session cookie.
     setAuthLoading(true);
     setAuthError("");
     try {
@@ -1186,6 +1263,7 @@ export default function App() {
   }
 
   async function refreshHintState(problemId) {
+    // Rebuild the full hint panel state for the selected problem.
     // Rebuild the full hint panel state for the selected problem.
     try {
       const response = await getHints(problemId);
@@ -1213,6 +1291,7 @@ export default function App() {
 
   async function refreshAnswerKeyState(problemId) {
     // Re-check whether the answer key is unlocked and cache it if visible.
+    // Re-check whether the answer key is unlocked and cache it if visible.
     try {
       const response = await getAnswerKey(problemId);
       setAnswerKeyState({
@@ -1226,6 +1305,8 @@ export default function App() {
     }
   }
 
+  // Route all run, submit, and auto-submit paths through the same helper so
+  // evaluation behavior stays consistent.
   // Route all run, submit, and auto-submit paths through the same helper so
   // evaluation behavior stays consistent.
   async function executeCode(action, options = {}) {
@@ -1295,6 +1376,7 @@ export default function App() {
 
   async function autoSubmitTimedChallenge(problemId) {
     // Submit whatever code is currently saved when a timer expires.
+    // Submit whatever code is currently saved when a timer expires.
     await executeCode("Submit", {
       forcedProblemId: problemId,
       timedMode: true,
@@ -1303,6 +1385,7 @@ export default function App() {
   }
 
   async function handleUnlockHint(stage) {
+    // Reveal one unlocked hint stage on demand.
     // Reveal one unlocked hint stage on demand.
     if (!selectedProblem || !session) {
       return;
@@ -1318,6 +1401,7 @@ export default function App() {
   }
 
   async function handleResetProgress() {
+    // Clear one problem back to its starter state for the current user.
     // Clear one problem back to its starter state for the current user.
     if (!selectedProblem || !session) {
       return;
@@ -1348,6 +1432,7 @@ export default function App() {
 
   function handleEnableTimedMode() {
     // Prepare the timer UI without starting the countdown yet.
+    // Prepare the timer UI without starting the countdown yet.
     if (!selectedProblem) {
       return;
     }
@@ -1360,6 +1445,7 @@ export default function App() {
 
   function handleDisableTimedMode() {
     // Exit timed mode and restore the problem's idle timer state.
+    // Exit timed mode and restore the problem's idle timer state.
     if (!selectedProblem) {
       return;
     }
@@ -1367,6 +1453,7 @@ export default function App() {
   }
 
   async function handleViewAnswerKey() {
+    // Load the answer key body once the learner chooses to reveal it.
     // Load the answer key body once the learner chooses to reveal it.
     if (!selectedProblem || !session) {
       return;
@@ -1381,6 +1468,7 @@ export default function App() {
   }
 
   async function handleLoadAuthorProblem(problemId) {
+    // Pull an author-owned custom problem into the JSON editor for editing.
     // Pull an author-owned custom problem into the JSON editor for editing.
     setAuthorEditor((current) => ({ ...current, loading: true, message: "", error: "" }));
     try {
@@ -1400,6 +1488,7 @@ export default function App() {
 
   function handleAuthorFileLoad(event) {
     // Read a local JSON file into the editor without uploading it yet.
+    // Read a local JSON file into the editor without uploading it yet.
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -1418,6 +1507,7 @@ export default function App() {
   }
 
   async function handleAuthorFileUpload(event) {
+    // Upload a chosen JSON file directly to the backend author endpoint.
     // Upload a chosen JSON file directly to the backend author endpoint.
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -1444,6 +1534,7 @@ export default function App() {
 
   async function handleAuthorUpload() {
     // Parse the JSON editor contents and create a new custom problem.
+    // Parse the JSON editor contents and create a new custom problem.
     setAuthorEditor((current) => ({ ...current, loading: true, message: "", error: "" }));
     try {
       const payload = JSON.parse(authorEditor.jsonText);
@@ -1464,6 +1555,7 @@ export default function App() {
 
   async function handleAuthorSave() {
     // Save edits made to an existing custom problem draft.
+    // Save edits made to an existing custom problem draft.
     setAuthorEditor((current) => ({ ...current, loading: true, message: "", error: "" }));
     try {
       const payload = JSON.parse(authorEditor.jsonText);
@@ -1476,6 +1568,7 @@ export default function App() {
   }
 
   async function handleAuthorToggle(problemId, action) {
+    // Flip a custom problem between enabled and disabled states.
     // Flip a custom problem between enabled and disabled states.
     try {
       if (action === "disable") {
@@ -1491,6 +1584,7 @@ export default function App() {
 
   async function handleAuthorDelete(problemId) {
     // Soft-delete a custom problem from the author dashboard.
+    // Soft-delete a custom problem from the author dashboard.
     try {
       await deleteProblem(problemId);
       await refreshProblemCollections();
@@ -1503,6 +1597,7 @@ export default function App() {
   }
 
   async function handleLogout() {
+    // Clear backend cookies if possible, then reset all client-side state.
     // Clear backend cookies if possible, then reset all client-side state.
     try {
       await logout();
@@ -1538,6 +1633,7 @@ export default function App() {
     return (
       <main className="app-shell auth-shell">
         <a className="skip-link" href="#auth-title">Skip to sign-in form</a>
+        <a className="skip-link" href="#auth-title">Skip to sign-in form</a>
         <AuthPanel
           onLogin={handleLogin}
           onRegister={handleRegister}
@@ -1552,6 +1648,7 @@ export default function App() {
 
   return (
     <main className="app-shell">
+      <a className="skip-link" href="#workspace-panel">Skip to main workspace</a>
       <a className="skip-link" href="#workspace-panel">Skip to main workspace</a>
       <header className="topbar">
         <div>
