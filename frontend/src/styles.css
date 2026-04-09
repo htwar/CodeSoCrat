@@ -322,6 +322,8 @@ button:disabled {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
 }
 
 .problem-items {
@@ -387,7 +389,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   font-size: 0.8rem;
   font-weight: 700;
   text-transform: capitalize;
@@ -395,8 +397,8 @@ button:disabled {
 }
 
 .source-pill.starter {
-  background: transparent;
-  color: var(--ink);
+  background: rgba(30, 29, 26, 0.05);
+  color: var(--muted);
 }
 
 .source-pill.author {
@@ -416,15 +418,22 @@ button:disabled {
   color: var(--muted);
 }
 
-.source-pill:hover {
-  background: var(--hover-surface);
-  border-color: rgba(190, 79, 44, 0.28);
-}
-
 .workspace-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.9fr);
   gap: 20px;
+}
+
+.workspace-heading {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
 }
 
 /* Problem workspace, timed mode, and editor surfaces. */
@@ -448,6 +457,23 @@ button:disabled {
   background: rgba(255, 255, 255, 0.7);
 }
 
+.timer-launcher {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  margin: 12px 0 18px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px dashed rgba(30, 29, 26, 0.2);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.timer-launcher-copy {
+  display: grid;
+  gap: 8px;
+}
+
 .timer-panel.running {
   border-color: rgba(190, 79, 44, 0.35);
   background: linear-gradient(135deg, rgba(190, 79, 44, 0.08), rgba(255, 255, 255, 0.8));
@@ -469,6 +495,14 @@ button:disabled {
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.timer-support {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  max-width: 20ch;
+  text-align: right;
 }
 
 .timer-clock {
@@ -693,8 +727,18 @@ button:disabled {
     align-items: stretch;
   }
 
+  .timer-launcher {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .timer-actions {
     justify-content: flex-start;
+  }
+
+  .timer-support {
+    max-width: none;
+    text-align: left;
   }
 
   .editor {

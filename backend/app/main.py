@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Dict, Optional, Union
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -217,7 +217,7 @@ def health_check() -> dict[str, str]:
 
 
 @app.get("/auth/google/config")
-def get_google_auth_config() -> dict[str, str | bool]:
+def get_google_auth_config() -> Dict[str, Union[str, bool]]:
     # Let the frontend know whether the Google button should be rendered.
     return {
         "enabled": bool(settings.google_client_id),

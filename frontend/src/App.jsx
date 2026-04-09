@@ -256,14 +256,15 @@ function ProblemList({ problems, selectedDifficulty, selectedProblemId, onDiffic
 function SubmissionPanel({
   problem,
   code,
-  setCode,
+  onEditorChange,
   onRun,
   onSubmit,
   onResetProgress,
+  onResetToStarter,
+  onLoadDemo,
   timedChallenge,
   onEnableTimedMode,
   onDisableTimedMode,
-  onStartTimedMode,
   submissionState,
   hintState,
   answerKeyState,
@@ -300,13 +301,18 @@ function SubmissionPanel({
     <section className="workspace-grid">
       <div className="panel workspace-panel" id="workspace-panel" tabIndex="-1" aria-labelledby="workspace-problem-title">
         <div className="panel-header">
-          <div>
+          <div className="workspace-heading">
             <p className="eyebrow">{problem.difficulty}</p>
             <h2 id="workspace-problem-title">{problem.title}</h2>
+            <div className="workspace-meta-row">
+              <span className={`source-pill ${problem.source}`}>{problem.source === "starter" ? "Starter Problem" : "Custom Problem"}</span>
+              <p className="meta-copy">
+                Required function: <code>{problem.function_name}</code>
+              </p>
+            </div>
           </div>
           <div className="panel-actions">
-            <span className={`source-pill ${problem.source}`}>{problem.source === "starter" ? "Starter" : "Custom"}</span>
-            <button type="button" className="secondary-button" onClick={() => setCode(problem.starter_code || "")}>
+            <button type="button" className="secondary-button" onClick={onResetToStarter}>
               Reset to Starter
             </button>
             <button type="button" className="danger-button" onClick={onResetProgress}>
@@ -315,9 +321,6 @@ function SubmissionPanel({
           </div>
         </div>
         <p className="prompt-copy">{problem.prompt}</p>
-        <p className="meta-copy">
-          Required function: <code>{problem.function_name}</code>
-        </p>
         {problem.example_cases?.length ? (
           <div className="examples-panel">
             <p className="meta-copy"><strong>Sample Cases</strong></p>
@@ -336,75 +339,76 @@ function SubmissionPanel({
             </div>
           </div>
         ) : null}
-        <section className={["timer-panel", timedChallenge.status].join(" ").trim()} aria-labelledby="timed-mode-title">
-          <div>
-            <p className="eyebrow">Timed Mode</p>
-            <h3 id="timed-mode-title">
-              {timedChallenge.status === "running"
-                ? "Timed challenge in progress"
-                : timedChallenge.status === "expiring"
-                  ? "Submitting timed challenge"
-                : timedChallenge.status === "expired"
-                  ? "Time is up"
-                  : timedChallenge.status === "completed"
-                    ? "Timed challenge completed"
-                    : timedChallenge.enabled
-                      ? "Challenge timer ready"
-                      : "Practice without a timer"}
-            </h3>
-            <p className="meta-copy">
-              {timedChallenge.status === "completed"
-                ? "You finished the timed challenge. Start another one whenever you want a new pressure run."
-                : timedChallenge.status === "expiring"
-                  ? "The timer reached zero and your latest saved code is being submitted automatically."
-                : timedChallenge.enabled
-                  ? `This ${problem.difficulty.toLowerCase()} problem gets ${formatSeconds(timedChallenge.limitSeconds)}. When time reaches 00:00, your current code is automatically submitted for grading.`
-                  : `Optional challenge timer: ${formatSeconds(timedChallenge.limitSeconds)} for ${problem.difficulty} problems.`}
-            </p>
-          </div>
-          <div className="timer-actions">
-            <div
-              className={`timer-clock ${timedChallenge.status}`}
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-              aria-label={`Timer status: ${formatSeconds(timedChallenge.remainingSeconds)} remaining`}
-            >
-              <span>{formatSeconds(timedChallenge.remainingSeconds)}</span>
+        {!timedChallenge.enabled ? (
+          <section className="timer-launcher" aria-labelledby="timed-mode-title">
+            <div className="timer-launcher-copy">
+              <p className="eyebrow">Timed Mode</p>
+              <h3 id="timed-mode-title">Want a timed challenge?</h3>
+              <p className="meta-copy">
+                This {problem.difficulty.toLowerCase()} problem gets {formatSeconds(timedChallenge.limitSeconds)}. Open timed mode when you want a pressure run.
+              </p>
             </div>
-            {!timedChallenge.enabled ? (
-              <button type="button" className="secondary-button" onClick={onEnableTimedMode}>
-                Use Timed Mode
-              </button>
-            ) : null}
-            {timedChallenge.enabled && timedChallenge.status === "ready" ? (
-              <>
-                <button type="button" onClick={onStartTimedMode}>
-                  Start Timer
-                </button>
+            <button type="button" className="secondary-button" onClick={onEnableTimedMode}>
+              Start Timer
+            </button>
+          </section>
+        ) : (
+          <section className={["timer-panel", timedChallenge.status].join(" ").trim()} aria-labelledby="timed-mode-title">
+            <div>
+              <p className="eyebrow">Timed Mode</p>
+              <h3 id="timed-mode-title">
+                {timedChallenge.status === "running"
+                  ? "Timed challenge in progress"
+                  : timedChallenge.status === "expiring"
+                    ? "Submitting timed challenge"
+                  : timedChallenge.status === "expired"
+                    ? "Time is up"
+                    : timedChallenge.status === "completed"
+                      ? "Timed challenge completed"
+                      : "Ready when you start typing"}
+              </h3>
+              <p className="meta-copy">
+                {timedChallenge.status === "completed"
+                  ? "You finished the timed challenge. Open it again whenever you want another pressure run."
+                  : timedChallenge.status === "expiring"
+                    ? "The timer reached zero and your latest saved code is being submitted automatically."
+                  : timedChallenge.status === "ready"
+                    ? `The ${formatSeconds(timedChallenge.limitSeconds)} countdown will begin as soon as you start editing in the code editor.`
+                    : `This ${problem.difficulty.toLowerCase()} problem gets ${formatSeconds(timedChallenge.limitSeconds)}. When time reaches 00:00, your current code is automatically submitted for grading.`}
+              </p>
+            </div>
+            <div className="timer-actions">
+              <div
+                className={`timer-clock ${timedChallenge.status}`}
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                aria-label={`Timer status: ${formatSeconds(timedChallenge.remainingSeconds)} remaining`}
+              >
+                <span>{formatSeconds(timedChallenge.remainingSeconds)}</span>
+              </div>
+              {timedChallenge.status === "ready" ? (
+                <p className="timer-support">The timer starts on your first keystroke.</p>
+              ) : null}
+              {timedChallenge.status === "running" ? (
                 <button type="button" className="ghost-button" onClick={onDisableTimedMode}>
-                  Cancel Timer
+                  Stop Timed Mode
                 </button>
-              </>
-            ) : null}
-            {timedChallenge.enabled && timedChallenge.status === "running" ? (
-              <button type="button" className="ghost-button" onClick={onDisableTimedMode}>
-                Stop Timed Mode
-              </button>
-            ) : null}
-            {timedChallenge.status === "expired" ? (
-              <button type="button" className="secondary-button" onClick={onDisableTimedMode}>
-                Clear Expired Timer
-              </button>
-            ) : null}
-          </div>
-        </section>
+              ) : null}
+              {["ready", "expired", "completed"].includes(timedChallenge.status) ? (
+                <button type="button" className="secondary-button" onClick={onDisableTimedMode}>
+                  {timedChallenge.status === "ready" ? "Cancel Timer" : "Close Timer"}
+                </button>
+              ) : null}
+            </div>
+          </section>
+        )}
         <div className="editor-frame">
           <Editor
             defaultLanguage="python"
             language="python"
             value={code}
-            onChange={(value) => setCode(value || "")}
+            onChange={(value) => onEditorChange(value || "")}
             options={editorOptions}
             theme="vs"
             height="420px"
@@ -426,7 +430,7 @@ function SubmissionPanel({
           >
             {submissionState.loadingAction === "Submit" ? "Submitting..." : "Submit"}
           </button>
-          <button type="button" className="ghost-button" onClick={() => setCode(demoSolution)}>
+          <button type="button" className="ghost-button" onClick={onLoadDemo}>
             Load Demo Pass
           </button>
         </div>
@@ -1063,9 +1067,24 @@ export default function App() {
   }, [timedChallengeByProblem]);
 
   function updateCode(nextCode) {
-    // Store editor changes under the currently selected problem id.
+    // Store editor changes under the currently selected problem id and arm the
+    // timer to begin on the learner's first edit when timed mode is ready.
     if (!selectedProblem) {
       return;
+    }
+    const activeChallenge = timedChallengeByProblem[selectedProblem.problem_id];
+    if (activeChallenge?.enabled && activeChallenge.status === "ready") {
+      const startedAt = Date.now();
+      const limitSeconds = activeChallenge.limitSeconds || TIME_LIMITS[selectedProblem.difficulty] || TIME_LIMITS.Easy;
+      setTimedChallenge(selectedProblem.problem_id, {
+        ...activeChallenge,
+        status: "running",
+        remainingSeconds: limitSeconds,
+        limitSeconds,
+        message: "",
+        startedAt,
+        expiresAt: startedAt + (limitSeconds * 1000),
+      });
     }
     setCodeByProblem((current) => ({
       ...current,
@@ -1347,24 +1366,6 @@ export default function App() {
     setTimedChallenge(selectedProblem.problem_id, buildTimedChallenge(selectedProblem));
   }
 
-  function handleStartTimedMode() {
-    // Start the countdown clock for the selected problem's difficulty tier.
-    if (!selectedProblem) {
-      return;
-    }
-    const startedAt = Date.now();
-    const limitSeconds = TIME_LIMITS[selectedProblem.difficulty] || TIME_LIMITS.Easy;
-    setTimedChallenge(selectedProblem.problem_id, buildTimedChallenge(selectedProblem, {
-      enabled: true,
-      status: "running",
-      remainingSeconds: limitSeconds,
-      limitSeconds,
-      message: "",
-      startedAt,
-      expiresAt: startedAt + (limitSeconds * 1000),
-    }));
-  }
-
   async function handleViewAnswerKey() {
     // Load the answer key body once the learner chooses to reveal it.
     if (!selectedProblem || !session) {
@@ -1578,14 +1579,15 @@ export default function App() {
         <SubmissionPanel
           problem={selectedProblem}
           code={currentCode}
-          setCode={updateCode}
+          onEditorChange={updateCode}
           onRun={() => executeCode("Run", { timedMode: selectedTimedChallenge?.status === "running" })}
           onSubmit={() => executeCode("Submit", { timedMode: selectedTimedChallenge?.status === "running" })}
           onResetProgress={handleResetProgress}
+          onResetToStarter={() => updateCode(selectedProblem?.starter_code || "")}
+          onLoadDemo={() => updateCode(demoSolution)}
           timedChallenge={selectedTimedChallenge}
           onEnableTimedMode={handleEnableTimedMode}
           onDisableTimedMode={handleDisableTimedMode}
-          onStartTimedMode={handleStartTimedMode}
           submissionState={submissionState}
           hintState={hintState}
           answerKeyState={answerKeyState}
