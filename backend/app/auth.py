@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 from typing import Optional
@@ -17,20 +18,71 @@ from app.database import get_db
 from app.models import User
 
 security = HTTPBearer(auto_error=False)
+PASSWORD_HASH_VERSION = "pbkdf2_sha256"
+PASSWORD_HASH_ITERATIONS = 200_000
 
 
 # Local password auth is intentionally simple for this project, while Google
 # auth is layered on top using the same signed session cookie model.
 def hash_password(password: str) -> str:
-    # Convert a plaintext password into the stored hash format used in the DB.
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    # Convert a plaintext password into a salted PBKDF2 hash string that can be
+    # stored safely in the database.
+    salt = secrets.token_bytes(16)
+    derived = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        PASSWORD_HASH_ITERATIONS,
+    )
+    return ":".join(
+        [
+            PASSWORD_HASH_VERSION,
+            str(PASSWORD_HASH_ITERATIONS),
+            base64.urlsafe_b64encode(salt).decode("utf-8"),
+            base64.urlsafe_b64encode(derived).decode("utf-8"),
+        ]
+    )
 
 
 def verify_password(password: str, password_hash: Optional[str]) -> bool:
-    # Compare an incoming password against the stored hash safely.
+    # Compare an incoming password against either the newer salted PBKDF2 format
+    # or the legacy unsalted SHA-256 format kept for migration compatibility.
     if not password_hash:
         return False
-    return hmac.compare_digest(hash_password(password), password_hash)
+    if password_hash.startswith(f"{PASSWORD_HASH_VERSION}:"):
+        try:
+            _version, iterations_str, encoded_salt, encoded_hash = password_hash.split(":", 3)
+            salt = base64.urlsafe_b64decode(encoded_salt.encode("utf-8"))
+            stored_hash = base64.urlsafe_b64decode(encoded_hash.encode("utf-8"))
+            iterations = int(iterations_str)
+        except (ValueError, TypeError):
+            return False
+        derived = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt,
+            iterations,
+        )
+        return hmac.compare_digest(derived, stored_hash)
+
+    # Legacy support for older local databases created before salted hashes
+    # were introduced.
+    legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(legacy_hash, password_hash)
+
+
+def password_needs_rehash(password_hash: Optional[str]) -> bool:
+    # Older SHA-256 hashes and outdated PBKDF2 iteration counts should be
+    # refreshed after a successful local login.
+    if not password_hash:
+        return False
+    if not password_hash.startswith(f"{PASSWORD_HASH_VERSION}:"):
+        return True
+    try:
+        _version, iterations_str, _encoded_salt, _encoded_hash = password_hash.split(":", 3)
+        return int(iterations_str) < PASSWORD_HASH_ITERATIONS
+    except (ValueError, TypeError):
+        return True
 
 
 def _decode_jwt_without_verification(token: str) -> dict:

@@ -49,6 +49,24 @@ textarea {
   border: 0;
 }
 
+.skip-link {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  transform: translateY(-160%);
+  padding: 12px 16px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff9f1;
+  font-weight: 700;
+  text-decoration: none;
+  z-index: 1000;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 code,
 .editor,
 .editor-frame {
@@ -199,9 +217,9 @@ button:disabled {
 .secondary-button:focus-visible,
 .ghost-button:hover,
 .ghost-button:focus-visible {
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--hover-surface);
   color: var(--ink);
-  border-color: rgba(30, 29, 26, 0.26);
+  border-color: rgba(190, 79, 44, 0.28);
 }
 
 .danger-button {
@@ -511,6 +529,12 @@ button:disabled {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
+.editor-frame:focus-within {
+  outline: 3px solid rgba(190, 79, 44, 0.75);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px rgba(255, 250, 241, 0.95);
+}
+
 .author-editor {
   min-height: 280px;
 }
@@ -617,6 +641,11 @@ button:disabled {
 .author-problem-card:hover {
   background: var(--hover-surface);
   border-color: rgba(190, 79, 44, 0.28);
+}
+
+.author-problem-card:focus-within {
+  border-color: rgba(190, 79, 44, 0.45);
+  background: linear-gradient(135deg, rgba(190, 79, 44, 0.12), rgba(255, 255, 255, 0.92));
 }
 
 .author-problem-copy {

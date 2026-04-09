@@ -127,24 +127,30 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
       <div className="auth-toggle" role="tablist" aria-label="Authentication mode">
         <button
           type="button"
+          id="auth-tab-login"
           className={mode === "login" ? "toggle-button active" : "toggle-button"}
           onClick={() => setMode("login")}
           role="tab"
           aria-selected={mode === "login"}
+          aria-controls="auth-form-panel"
+          tabIndex={mode === "login" ? 0 : -1}
         >
           Sign in
         </button>
         <button
           type="button"
+          id="auth-tab-register"
           className={mode === "register" ? "toggle-button active" : "toggle-button"}
           onClick={() => setMode("register")}
           role="tab"
           aria-selected={mode === "register"}
+          aria-controls="auth-form-panel"
+          tabIndex={mode === "register" ? 0 : -1}
         >
           Create account
         </button>
       </div>
-      <form className="auth-form" onSubmit={handleSubmit}>
+      <form className="auth-form" id="auth-form-panel" onSubmit={handleSubmit}>
         <label htmlFor="auth-email">Email</label>
         <input
           id="auth-email"
@@ -190,7 +196,7 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
       ) : (
         <p className="meta-copy">Google sign-in becomes available after `CODESOCRAT_GOOGLE_CLIENT_ID` is configured.</p>
       )}
-      <p className="status-text" aria-live="polite">
+      <p className="status-text" role="status" aria-live="polite">
         {error || ""}
       </p>
       <div className="account-hints">
@@ -204,11 +210,11 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
 function ProblemList({ problems, selectedDifficulty, selectedProblemId, onDifficultyChange, onSelect }) {
   // Left-hand catalog used to switch between available coding problems.
   return (
-    <aside className="panel problem-list">
+    <aside className="panel problem-list" aria-labelledby="problem-list-title">
       <div className="panel-header">
         <div>
           <p className="eyebrow">Problem Set</p>
-          <h2>Choose a challenge</h2>
+          <h2 id="problem-list-title">Choose a challenge</h2>
         </div>
       </div>
       <div className="difficulty-picker" role="tablist" aria-label="Difficulty levels">
@@ -216,10 +222,13 @@ function ProblemList({ problems, selectedDifficulty, selectedProblemId, onDiffic
           <button
             key={difficulty}
             type="button"
+            id={`difficulty-tab-${difficulty}`}
             className={selectedDifficulty === difficulty ? "difficulty-chip active" : "difficulty-chip"}
             onClick={() => onDifficultyChange(difficulty)}
             role="tab"
             aria-selected={selectedDifficulty === difficulty}
+            aria-controls="workspace-panel"
+            tabIndex={selectedDifficulty === difficulty ? 0 : -1}
           >
             {difficulty}
           </button>
@@ -264,6 +273,7 @@ function SubmissionPanel({
   // Main learner workspace: prompt, timer, code editor, run/submit actions,
   // and the latest result state.
   const editorOptions = {
+    ariaLabel: problem ? `${problem.title} Python editor` : "Python editor",
     automaticLayout: true,
     fontSize: 15,
     glyphMargin: false,
@@ -288,11 +298,11 @@ function SubmissionPanel({
 
   return (
     <section className="workspace-grid">
-      <div className="panel workspace-panel">
+      <div className="panel workspace-panel" id="workspace-panel" tabIndex="-1" aria-labelledby="workspace-problem-title">
         <div className="panel-header">
           <div>
             <p className="eyebrow">{problem.difficulty}</p>
-            <h2>{problem.title}</h2>
+            <h2 id="workspace-problem-title">{problem.title}</h2>
           </div>
           <div className="panel-actions">
             <span className={`source-pill ${problem.source}`}>{problem.source === "starter" ? "Starter" : "Custom"}</span>
@@ -326,10 +336,10 @@ function SubmissionPanel({
             </div>
           </div>
         ) : null}
-        <section className={["timer-panel", timedChallenge.status].join(" ").trim()}>
+        <section className={["timer-panel", timedChallenge.status].join(" ").trim()} aria-labelledby="timed-mode-title">
           <div>
             <p className="eyebrow">Timed Mode</p>
-            <h3>
+            <h3 id="timed-mode-title">
               {timedChallenge.status === "running"
                 ? "Timed challenge in progress"
                 : timedChallenge.status === "expiring"
@@ -353,7 +363,13 @@ function SubmissionPanel({
             </p>
           </div>
           <div className="timer-actions">
-            <div className={`timer-clock ${timedChallenge.status}`}>
+            <div
+              className={`timer-clock ${timedChallenge.status}`}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              aria-label={`Timer status: ${formatSeconds(timedChallenge.remainingSeconds)} remaining`}
+            >
               <span>{formatSeconds(timedChallenge.remainingSeconds)}</span>
             </div>
             {!timedChallenge.enabled ? (
@@ -414,16 +430,16 @@ function SubmissionPanel({
             Load Demo Pass
           </button>
         </div>
-        {timedChallenge.message ? <p className="success-text">{timedChallenge.message}</p> : null}
+        {timedChallenge.message ? <p className="success-text" role="status" aria-live="polite">{timedChallenge.message}</p> : null}
         {timedChallenge.status === "expiring" ? (
-          <p className="meta-copy">Auto-submitting your timed attempt now.</p>
+          <p className="meta-copy" role="status" aria-live="polite">Auto-submitting your timed attempt now.</p>
         ) : null}
         {timedChallenge.status === "expired" ? (
-          <p className="error-text">Time expired. Your current code was submitted automatically, and further submissions are locked until you clear timed mode.</p>
+          <p className="error-text" role="alert">Time expired. Your current code was submitted automatically, and further submissions are locked until you clear timed mode.</p>
         ) : null}
-        {submissionState.error ? <p className="error-text">{submissionState.error}</p> : null}
+        {submissionState.error ? <p className="error-text" role="alert">{submissionState.error}</p> : null}
         {submissionState.result ? (
-          <div className={submissionState.result.result === "Pass" ? "result-card pass" : "result-card fail"}>
+          <div className={submissionState.result.result === "Pass" ? "result-card pass" : "result-card fail"} role="status" aria-live="polite">
             <h3>{submissionState.result.result}</h3>
             <p>{submissionState.result.feedback}</p>
             <div className="result-grid">
@@ -437,14 +453,14 @@ function SubmissionPanel({
         ) : null}
       </div>
 
-      <div className="panel hints-panel">
+      <div className="panel hints-panel" aria-labelledby="hints-panel-title">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Feedback</p>
-            <h2>Hints</h2>
+            <h2 id="hints-panel-title">Hints</h2>
           </div>
         </div>
-        {hintState.error ? <p className="error-text">{hintState.error}</p> : null}
+        {hintState.error ? <p className="error-text" role="alert">{hintState.error}</p> : null}
         <HintCard title="Conceptual" stage={1} hintState={hintState} onUnlockHint={onUnlockHint} />
         <HintCard title="Strategic" stage={2} hintState={hintState} onUnlockHint={onUnlockHint} />
         <HintCard title="Syntactic" stage={3} hintState={hintState} onUnlockHint={onUnlockHint} />
@@ -465,7 +481,7 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
   const isLoading = hintState.loadingStage === stage;
 
   return (
-    <article className={["hint-card", content ? "unlocked" : "locked", isHighlighted ? "highlighted" : ""].join(" ").trim()}>
+    <article className={["hint-card", content ? "unlocked" : "locked", isHighlighted ? "highlighted" : ""].join(" ").trim()} aria-live={content ? "polite" : "off"}>
       <h3>{title}</h3>
       <p>
         {content
@@ -489,7 +505,7 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
   const hasContent = Boolean(answerKeyState.content);
 
   return (
-    <article className={["hint-card", hasContent ? "unlocked" : "locked", isUnlocked ? "highlighted" : ""].join(" ").trim()}>
+    <article className={["hint-card", hasContent ? "unlocked" : "locked", isUnlocked ? "highlighted" : ""].join(" ").trim()} aria-live={hasContent ? "polite" : "off"}>
       <h3>Answer Key</h3>
       {hasContent ? (
         <>
@@ -500,6 +516,7 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
               language="python"
               value={answerKeyState.content.solution_code}
               options={{
+                ariaLabel: "Reference solution code viewer",
                 automaticLayout: true,
                 fontSize: 14,
                 lineNumbers: "on",
@@ -521,7 +538,7 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
             : "Locked until you reach three valid failed Submit attempts on this problem."}
         </p>
       )}
-      {answerKeyState.error ? <p className="error-text">{answerKeyState.error}</p> : null}
+      {answerKeyState.error ? <p className="error-text" role="alert">{answerKeyState.error}</p> : null}
       {isUnlocked && !hasContent ? (
         <button type="button" className="secondary-button" onClick={onViewAnswerKey} disabled={answerKeyState.loading}>
           {answerKeyState.loading ? "Loading..." : "View Answer Key"}
@@ -552,6 +569,7 @@ function AuthorPanel({
   const loadFileInputRef = useRef(null);
   const uploadFileInputRef = useRef(null);
   const authorEditorOptions = {
+    ariaLabel: "Problem JSON editor",
     automaticLayout: true,
     fontSize: 14,
     formatOnPaste: true,
@@ -565,12 +583,12 @@ function AuthorPanel({
   };
 
   return (
-    <section className="author-layout">
-      <section className="panel author-panel">
+    <section className="author-layout" aria-label="Author dashboard">
+      <section className="panel author-panel" aria-labelledby="author-library-title">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Author Dashboard</p>
-            <h2>Manage problem library</h2>
+            <h2 id="author-library-title">Manage problem library</h2>
           </div>
           <button type="button" className="secondary-button" onClick={onCreateNew}>
             New Upload Draft
@@ -581,16 +599,19 @@ function AuthorPanel({
             <button
               key={filterItem.id}
               type="button"
+              id={`author-filter-${filterItem.id}`}
               className={authorFilter === filterItem.id ? "difficulty-chip active" : "difficulty-chip"}
               onClick={() => onAuthorFilterChange(filterItem.id)}
               role="tab"
               aria-selected={authorFilter === filterItem.id}
+              aria-controls="author-problem-list"
+              tabIndex={authorFilter === filterItem.id ? 0 : -1}
             >
               {filterItem.label}
             </button>
           ))}
         </div>
-        <div className="problem-items">
+        <div className="problem-items" id="author-problem-list">
           {authorProblems.map((problem) => (
             <article key={problem.problem_id} className="author-problem-card">
               <div className="author-problem-copy">
@@ -631,11 +652,11 @@ function AuthorPanel({
         </div>
       </section>
 
-      <section className="panel author-panel">
+      <section className="panel author-panel" aria-labelledby="author-workspace-title">
         <div className="panel-header">
           <div>
             <p className="eyebrow">JSON Workspace</p>
-            <h2>{authorEditor.mode === "edit" ? `Editing ${authorEditor.problemId}` : "Upload one problem JSON file"}</h2>
+            <h2 id="author-workspace-title">{authorEditor.mode === "edit" ? `Editing ${authorEditor.problemId}` : "Upload one problem JSON file"}</h2>
           </div>
         </div>
         <p className="prompt-copy">
@@ -1515,6 +1536,7 @@ export default function App() {
   if (!session) {
     return (
       <main className="app-shell auth-shell">
+        <a className="skip-link" href="#auth-title">Skip to sign-in form</a>
         <AuthPanel
           onLogin={handleLogin}
           onRegister={handleRegister}
@@ -1529,6 +1551,7 @@ export default function App() {
 
   return (
     <main className="app-shell">
+      <a className="skip-link" href="#workspace-panel">Skip to main workspace</a>
       <header className="topbar">
         <div>
           <p className="eyebrow">Logged In</p>
