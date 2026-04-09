@@ -15,6 +15,7 @@ from app.auth import (
     create_token,
     get_current_user,
     hash_password,
+    password_needs_rehash,
     require_author,
     require_csrf,
     verify_google_id_token,
@@ -231,6 +232,12 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
     user = db.query(User).filter(User.email == payload.email).first()
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
+    if user.password_hash and password_needs_rehash(user.password_hash):
+        # Upgrade older local password hashes opportunistically after a
+        # successful login so existing accounts migrate without a reset flow.
+        user.password_hash = hash_password(payload.password)
+        db.commit()
+        db.refresh(user)
 
     _set_session_cookie(response, create_token(user))
     return _build_login_response(user)

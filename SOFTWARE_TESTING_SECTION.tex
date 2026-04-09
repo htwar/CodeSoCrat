@@ -163,6 +163,7 @@ Significant integration changes should be reviewed during team meetings before r
 Representative integration test cases:
 \begin{itemize}
     \item Test student registration and login: Ensure a new user is created as \texttt{Student} and receives session and CSRF cookies.
+    \item Test secure password storage and migration: Ensure new local registrations store salted PBKDF2 hashes and legacy SHA-256 hashes are upgraded after successful login.
     \item Test run versus submit behavior: Ensure \texttt{Run} returns feedback without unlocking hints or progressing attempts.
     \item Test hint unlocking flow: Ensure repeated failed submits unlock hint stages in the correct order and the answer key only after the threshold.
     \item Test author lifecycle flow: Ensure an author can upload, update, disable, enable, and delete only their own custom problem.
@@ -355,6 +356,7 @@ Representative security test cases:
     \item Test invalid login payload shape: Ensure unexpected fields are rejected by schema validation.
     \item Test invalid submission problem identifier: Ensure malformed problem ids are rejected.
     \item Test starter-problem protection: Ensure authors cannot disable or edit starter problems.
+    \item Test password hashing upgrade: Ensure new local registrations store salted PBKDF2 hashes and older SHA-256 hashes are rehashed after successful login.
 \end{itemize}
 
 \subsubsection{Manual Browser Checklist}
@@ -376,5 +378,6 @@ MB-CS-05 & Hover over buttons, chips, and author dashboard controls. & Hover fee
 \hline
 MB-CS-06 & Configure Google login, reload the login page, and inspect the Google sign-in area. & The Google sign-in button appears only when backend Google configuration is enabled. &  \\
 \hline
+MB-CS-07 & Use the skip link on the auth page or main workspace, then trigger success, timer, and error messages. & Skip links move focus to the intended panel and status or error messages are surfaced in accessibility-friendly regions. &  \\
+\hline
 \end{tabular}
-

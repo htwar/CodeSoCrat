@@ -177,6 +177,16 @@ class BackendFlowTests(unittest.TestCase):
         )
         self.assertEqual(login.status_code, 200)
 
+        db = self.SessionLocal()
+        try:
+            from app.models import User
+
+            user = db.query(User).filter(User.email == "new.student@example.com").first()
+            self.assertIsNotNone(user)
+            self.assertTrue(user.password_hash.startswith("pbkdf2_sha256:"))
+        finally:
+            db.close()
+
     def test_register_rejects_duplicate_email(self) -> None:
         # Duplicate identity creation should be blocked before a second account
         # can be created with the same email.
@@ -189,6 +199,38 @@ class BackendFlowTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 409)
+
+    def test_login_upgrades_legacy_password_hash(self) -> None:
+        # Older unsalted SHA-256 hashes should still verify once, then be
+        # replaced with the newer salted format after a successful login.
+        legacy_hash = "0c706cd9e9c31663612230ff8d74850ca2efdce103dedc77cdd66bf4cfd192ce"
+        db = self.SessionLocal()
+        try:
+            from app.models import User
+
+            user = db.query(User).filter(User.email == "student@codesocrat.dev").first()
+            self.assertIsNotNone(user)
+            user.password_hash = legacy_hash
+            db.commit()
+        finally:
+            db.close()
+
+        response = self.client.post(
+            "/auth/login",
+            json={"email": "student@codesocrat.dev", "password": "studentpass"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        db = self.SessionLocal()
+        try:
+            from app.models import User
+
+            user = db.query(User).filter(User.email == "student@codesocrat.dev").first()
+            self.assertIsNotNone(user)
+            self.assertNotEqual(user.password_hash, legacy_hash)
+            self.assertTrue(user.password_hash.startswith("pbkdf2_sha256:"))
+        finally:
+            db.close()
 
     def test_session_endpoint_uses_cookie_auth(self) -> None:
         # Once logged in, the session endpoint should be able to rebuild the

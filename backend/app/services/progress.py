@@ -47,7 +47,9 @@ class ProgressService:
 
         if valid_attempt:
             progress.valid_failed_attempts += 1
-        if progress.valid_failed_attempts >= 4:
+        # The SRS unlocks the answer key after three valid failed submits for
+        # the same user/problem pair.
+        if progress.valid_failed_attempts >= 3:
             progress.answer_key_unlocked = True
 
         progress.unlocked_stage = max(self.get_unlocked_stages(progress), default=0)
