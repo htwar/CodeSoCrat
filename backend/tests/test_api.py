@@ -1,5 +1,6 @@
 import json
 import os
+import importlib
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -29,6 +30,16 @@ class BackendFlowTests(unittest.TestCase):
         settings.login_rate_limit_ip = 10
         settings.login_rate_limit_user = 5
         settings.google_client_id = "test-google-client-id"
+
+        import app.database as database_module
+        import app.main as main_module
+        import app.models as models_module
+        import app.rate_limit as rate_limit_module
+
+        database_module = importlib.reload(database_module)
+        models_module = importlib.reload(models_module)
+        rate_limit_module = importlib.reload(rate_limit_module)
+        main_module = importlib.reload(main_module)
 
         from app.database import Base, SessionLocal, engine
         import app.main as main_module
@@ -110,6 +121,7 @@ class BackendFlowTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         # Remove the temporary database directory once the suite finishes.
+        cls.engine.dispose()
         cls.temp_dir.cleanup()
         os.environ.pop("CODESOCRAT_DATABASE_URL", None)
 

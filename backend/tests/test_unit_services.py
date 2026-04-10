@@ -1,4 +1,5 @@
 import os
+import importlib
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -20,8 +21,15 @@ class UnitServiceTests(unittest.TestCase):
 
         settings.database_url = os.environ["CODESOCRAT_DATABASE_URL"]
 
-        import app.models  # noqa: F401
-        from app.database import Base, SessionLocal, engine
+        import app.database as database_module
+        import app.models as models_module
+
+        database_module = importlib.reload(database_module)
+        models_module = importlib.reload(models_module)
+
+        Base = database_module.Base
+        SessionLocal = database_module.SessionLocal
+        engine = database_module.engine
 
         cls.Base = Base
         cls.SessionLocal = SessionLocal
@@ -29,6 +37,7 @@ class UnitServiceTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
+        cls.engine.dispose()
         cls.temp_dir.cleanup()
         os.environ.pop("CODESOCRAT_DATABASE_URL", None)
 
