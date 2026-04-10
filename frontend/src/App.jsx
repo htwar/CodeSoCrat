@@ -68,7 +68,7 @@ const AUTHOR_FILTERS = [
 ];
 const HINT_TYPE_LABELS = {
   0: "None",
-  1: "None",
+  1: "Conceptual",
   2: "Strategic",
   3: "Syntactic",
 };
@@ -299,6 +299,7 @@ function SubmissionPanel({
   onRun,
   onSubmit,
   onResetProgress,
+  onResetToStarter,
   onLoadDemo,
   timedChallenge,
   onEnableTimedMode,
@@ -351,6 +352,9 @@ function SubmissionPanel({
             </div>
           </div>
           <div className="panel-actions">
+            <button type="button" className="secondary-button" onClick={onResetToStarter}>
+              Reset to Starter
+            </button>
             <button type="button" className="danger-button" onClick={onResetProgress}>
               Reset Progress
             </button>
@@ -1724,7 +1728,8 @@ export default function App() {
           <p className="meta-copy">{session.display_name || session.email}</p>
         </div>
         <div className="topbar-actions">
-          <span className="role-pill">{session.role}</span>
+          <span>{session.role}</span>
+          <span className="auth-provider-pill">{session.auth_provider}</span>
           <button type="button" className="secondary-button" onClick={handleLogout}>
             Sign out
           </button>
@@ -1746,6 +1751,7 @@ export default function App() {
           onRun={() => executeCode("Run", { timedMode: Boolean(selectedTimedChallenge?.enabled) })}
           onSubmit={() => executeCode("Submit", { timedMode: Boolean(selectedTimedChallenge?.enabled) })}
           onResetProgress={handleResetProgress}
+          onResetToStarter={() => updateCode(selectedProblem?.starter_code || "")}
           onLoadDemo={() => updateCode(demoSolution)}
           timedChallenge={selectedTimedChallenge}
           onEnableTimedMode={handleEnableTimedMode}
