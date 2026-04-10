@@ -1,7 +1,5 @@
 .env
 .env.production
-.env.example
-.env.production.example
 .env.local
 README(dev).md
 codesocrat.db
