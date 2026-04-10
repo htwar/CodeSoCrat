@@ -1,54 +1,86 @@
 # CodeSoCrat
 
-CodeSoCrat is a web application for Python coding practice. Students can work through problems, run or submit solutions, receive adaptive hints, and unlock answer keys after repeated valid failed submissions. The app is built with a React frontend, a FastAPI backend, a SQL database, Docker-based code execution, and Ollama-powered hint generation.
+CodeSoCrat is a web app for practicing Python function problems with guided feedback. Students can run code without affecting progress, submit official attempts, unlock hints as they struggle, and eventually reveal the answer key. Authors can upload new problems through a JSON-based workflow.
 
-## Features
+The project uses:
 
-- Student registration and login with secure cookie-based sessions
-- Difficulty-based problem browsing
-- Monaco editor for student code and author JSON uploads
-- Separate `Run` and `Submit` actions
-- Adaptive conceptual, strategic, and syntactic hints
-- Hidden grading test cases with visible sample cases
-- Answer key unlocking after repeated valid failed submissions
-- Optional timed mode with difficulty-based countdowns and auto-submit on expiry
-- Author-only problem uploads with schema validation
-- Docker sandbox execution for Python code
-- Production deployment path with PostgreSQL, Caddy, and Docker Compose
+- React + Vite on the frontend
+- FastAPI + SQLAlchemy on the backend
+- Docker to run student code in an isolated Python sandbox
+- Ollama for hint generation
+- SQLite for local development and PostgreSQL for deployment
 
-## Tech Stack
+## What it does
 
-- Frontend: React + Vite + Monaco
-- Backend: FastAPI + SQLAlchemy
-- Database: SQLite for local development, PostgreSQL-ready for production
-- Sandbox: Docker
-- Hint generation: Ollama
-- Reverse proxy / HTTPS: Caddy
+- student registration and login
+- secure cookie-based sessions with CSRF protection
+- optional Google sign-in
+- easy / medium / hard problem selection
+- Monaco editor for student code and author JSON editing
+- separate `Run` and `Submit` actions
+- timed mode with countdown and auto-submit on expiry
+- conceptual, strategic, and syntactic hints
+- answer key unlock after repeated valid failed submits
+- author-only problem upload, edit, disable, enable, and delete flows
 
-## Local Development
+## Project structure
 
-1. Create local env files from the templates:
-
-```bash
-cp .env.example .env
-cp frontend/.env.example frontend/.env
+```text
+backend/   FastAPI app, database models, evaluation, hints, tests
+frontend/  React app built with Vite
+data/      starter problem set
 ```
 
-If you want Google login, put your Google OAuth client id in `.env`:
+## Local setup
+
+### 1. Install backend dependencies
+
+From the repo root:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+### 2. Create a local backend env file
+
+Create a `.env` file in the project root. A minimal local setup looks like this:
+
+```env
+CODESOCRAT_DATABASE_URL=sqlite:///./codesocrat.db
+CODESOCRAT_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+CODESOCRAT_SESSION_COOKIE_SECURE=false
+CODESOCRAT_OLLAMA_BASE_URL=http://127.0.0.1:11434
+CODESOCRAT_OLLAMA_MODEL=qwen2.5-coder:14b
+```
+
+If you want Google sign-in, also add:
 
 ```env
 CODESOCRAT_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 ```
 
-This is the only project file change needed for local Google configuration. The backend already reads `.env` automatically and the frontend asks the backend whether Google auth is enabled.
+### 3. Create a local frontend env file
 
-2. Start the backend:
+Create `frontend/.env` with:
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+If you use cookie auth locally, keep the frontend and backend on the same hostname. For example:
+
+- frontend: `http://localhost:5173`
+- backend: `http://localhost:8000`
+
+Do not mix `localhost` and `127.0.0.1` in the same session.
+
+### 4. Start the backend
 
 ```bash
 python3 -m uvicorn app.main:app --reload --app-dir backend
 ```
 
-3. Start the frontend:
+### 5. Start the frontend
 
 ```bash
 cd frontend
@@ -56,52 +88,96 @@ npm install
 npm run dev
 ```
 
-4. Open the app at `http://127.0.0.1:5173`.
+Open the app at [http://localhost:5173](http://localhost:5173).
 
-## Author JSON Uploads
+## Docker sandbox note
 
-Authors can add problems in two ways from the dashboard:
+Student code runs in a Docker container using the image `python:3.11-alpine`.
 
-- Load a JSON file into the Monaco editor, review or edit it, then upload
-- Upload a `.json` problem file directly
+If that image is missing locally, the backend is configured to pull it automatically when needed. Docker still needs to be installed and running.
 
-Each file must contain exactly one problem payload matching the CodeSoCrat problem schema. The backend parses the uploaded JSON and uses the file's `difficulty`, `function_name`, test cases, hints, and answer key fields to create the problem.
+## Running tests
 
-## Production Deployment
-
-The repository includes a production path with:
-
-- [docker-compose.yml](/Users/htwarreh/Documents/CodeSoCrat/docker-compose.yml)
-- [Caddyfile](/Users/htwarreh/Documents/CodeSoCrat/Caddyfile)
-- [backend/Dockerfile](/Users/htwarreh/Documents/CodeSoCrat/backend/Dockerfile)
-- [frontend/Dockerfile](/Users/htwarreh/Documents/CodeSoCrat/frontend/Dockerfile)
-- [frontend/nginx.conf](/Users/htwarreh/Documents/CodeSoCrat/frontend/nginx.conf)
-- [.env.production.example](/Users/htwarreh/Documents/CodeSoCrat/.env.production.example)
-
-Basic deployment flow:
-
-1. Copy the production template:
+Backend:
 
 ```bash
-cp .env.production.example .env.production
+python3 -m unittest backend.tests.test_api backend.tests.test_unit_services backend.tests.test_system_workflows
 ```
 
-2. Update the production env values for your domain, database, and secrets.
-3. Point your DNS record at the server.
-4. Open ports `80` and `443`.
-5. Start the stack:
+Frontend build check:
+
+```bash
+cd frontend
+npm run build
+```
+
+## Author problem format
+
+Authors upload one JSON problem at a time. A problem can include:
+
+- `problem_id`
+- `title`
+- `prompt`
+- `difficulty`
+- `function_name`
+- `starter_code`
+- `example_cases`
+- `test_cases`
+- `hints`
+- `answer_key`
+
+Example cases are visible to students. Test cases are kept hidden for grading.
+
+## Production deployment
+
+The repo includes a production deployment path with:
+
+- [docker-compose.yml](docker-compose.yml)
+- [Caddyfile](Caddyfile)
+- [backend/Dockerfile](backend/Dockerfile)
+- [frontend/Dockerfile](frontend/Dockerfile)
+- [frontend/nginx.conf](frontend/nginx.conf)
+
+The production stack uses:
+
+- PostgreSQL
+- FastAPI backend
+- Nginx-served frontend
+- Caddy as the reverse proxy with HTTPS
+
+Typical deployment command:
 
 ```bash
 docker compose --env-file .env.production up -d --build
 ```
 
-Caddy will handle HTTPS automatically once the domain resolves correctly.
+Your `.env.production` should define values such as:
 
-## Security
+```env
+CODESOCRAT_DOMAIN=your-domain.example
+POSTGRES_DB=codesocrat
+POSTGRES_USER=codesocrat
+POSTGRES_PASSWORD=change-me
+CODESOCRAT_DATABASE_URL=postgresql+psycopg://codesocrat:change-me@db:5432/codesocrat
+CODESOCRAT_SECRET_KEY_CURRENT=replace-this-with-a-long-random-secret
+CODESOCRAT_CORS_ORIGINS=https://your-domain.example
+```
 
-- Strict schema validation rejects unexpected fields
-- Rate limiting on public endpoints
-- `HttpOnly` cookie sessions
+## Security notes
+
+The app currently includes:
+
+- schema-based request validation
+- rate limiting
+- `HttpOnly` session cookies
 - CSRF protection on state-changing routes
-- Docker sandbox with network disabled and resource limits
-- Environment-based secret management
+- role-based author access
+- Docker-based sandbox execution
+- environment-based secret configuration
+
+## Demo accounts
+
+For local development, starter users are seeded automatically:
+
+- `student@codesocrat.dev` / `studentpass`
+- `author@codesocrat.dev` / `authorpass`
