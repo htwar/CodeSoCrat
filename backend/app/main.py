@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
+from math import ceil
 from typing import Dict, Optional, Union
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile, status
@@ -15,7 +17,6 @@ from app.auth import (
     create_token,
     get_current_user,
     hash_password,
-    password_needs_rehash,
     password_needs_rehash,
     require_author,
     require_csrf,
@@ -33,6 +34,7 @@ from app.schemas import (
     LoginRequest,
     LoginResponse,
     ProblemListResponse,
+    ProblemProgressResponse,
     ProblemSummary,
     ProblemUpdateResponse,
     ProblemUploadPayload,
@@ -224,6 +226,47 @@ def _get_manageable_problem(problem_id: str, *, user: User, db: Session) -> Prob
     return problem
 
 
+def _timed_limit_seconds(problem: Problem) -> int:
+    if problem.difficulty == "Hard":
+        return settings.timed_mode_hard_seconds
+    if problem.difficulty == "Medium":
+        return settings.timed_mode_medium_seconds
+    return settings.timed_mode_easy_seconds
+
+
+def _serialize_progress(problem: Problem, progress: UserProblemProgress) -> ProblemProgressResponse:
+    now = datetime.utcnow()
+    limit_seconds = _timed_limit_seconds(problem)
+
+    if not progress.timed_mode_enabled:
+        timed_status = "off"
+        remaining_seconds = limit_seconds
+    elif progress.timed_mode_started_at is None or progress.timed_mode_expires_at is None:
+        timed_status = "ready"
+        remaining_seconds = limit_seconds
+    elif progress.timed_mode_paused_at is not None:
+        remaining_seconds = max(0, ceil((progress.timed_mode_expires_at - progress.timed_mode_paused_at).total_seconds()))
+        timed_status = "paused" if remaining_seconds > 0 else "expired"
+    else:
+        remaining_seconds = max(0, ceil((progress.timed_mode_expires_at - now).total_seconds()))
+        timed_status = "running" if remaining_seconds > 0 else "expired"
+
+    return ProblemProgressResponse(
+        problem_id=problem.problem_id,
+        valid_failed_attempts=progress.valid_failed_attempts,
+        unlocked_stage=progress.unlocked_stage,
+        answer_key_unlocked=progress.answer_key_unlocked,
+        completed=progress.completed,
+        timed_mode_enabled=progress.timed_mode_enabled,
+        timed_mode_status=timed_status,
+        timed_mode_limit_seconds=limit_seconds,
+        timed_mode_remaining_seconds=remaining_seconds,
+        timed_mode_started_at=progress.timed_mode_started_at.replace(tzinfo=timezone.utc).isoformat() if progress.timed_mode_started_at else None,
+        timed_mode_expires_at=progress.timed_mode_expires_at.replace(tzinfo=timezone.utc).isoformat() if progress.timed_mode_expires_at else None,
+        timed_mode_paused_at=progress.timed_mode_paused_at.replace(tzinfo=timezone.utc).isoformat() if progress.timed_mode_paused_at else None,
+    )
+
+
 @app.get("/health")
 def health_check() -> dict[str, str]:
     # Minimal readiness endpoint for local checks and container health probes.
@@ -339,9 +382,22 @@ def get_session(response: Response, request: Request, user: User = Depends(get_c
 
 
 @app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
-def logout(_csrf: None = Depends(require_csrf)) -> Response:
-    # Clear cookies so the browser is no longer authenticated.
-    # Clear cookies so the browser is no longer authenticated.
+def logout(
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    # Clear cookies so the browser is no longer authenticated, and reset any
+    # active timed-mode state so the next login starts from the untimed state.
+    progress_rows = (
+        db.query(UserProblemProgress)
+        .filter(UserProblemProgress.user_id == user.id, UserProblemProgress.timed_mode_enabled.is_(True))
+        .all()
+    )
+    for progress in progress_rows:
+        progress_service.clear_timed_mode(progress)
+    db.commit()
+
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     _clear_session_cookie(response)
     return response
@@ -383,16 +439,41 @@ def _execute_code(
     payload: SubmissionRequest,
     user: User,
     db: Session,
+    allow_expired_timed_submit: bool = False,
 ) -> SubmissionResponse:
     problem = _get_visible_problem(payload.problem_id, db)
+    progress = progress_service.get_or_create(db, user=user, problem=problem)
+    progress_snapshot = _serialize_progress(problem, progress)
+    effective_timed_mode = progress_snapshot.timed_mode_enabled
+
+    if payload.timed_mode and not progress_snapshot.timed_mode_enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Timed mode is not active for this problem.")
+
+    if progress_snapshot.timed_mode_status == "expired" and not allow_expired_timed_submit:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Timed mode has expired for this problem. Clear or restart the timer before continuing.",
+        )
+    if progress_snapshot.timed_mode_status == "paused":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Timed mode is paused while hint generation is in progress. Wait for the hint to finish loading.",
+        )
+
+    if progress_snapshot.timed_mode_status == "ready" and payload.timed_mode:
+        started_at = datetime.utcnow()
+        progress.timed_mode_started_at = started_at
+        progress.timed_mode_expires_at = started_at + timedelta(seconds=progress_snapshot.timed_mode_limit_seconds)
+        db.flush()
+        progress_snapshot = _serialize_progress(problem, progress)
+        effective_timed_mode = True
+
     test_cases = [(json.loads(case.input_json), json.loads(case.expected_json)) for case in problem.test_cases]
     evaluation = evaluation_service.evaluate(
         code=payload.code,
         function_name=problem.function_name,
         test_cases=test_cases,
     )
-
-    progress = progress_service.get_or_create(db, user=user, problem=problem)
     progress_service.apply_submission_outcome(
         progress=progress,
         execution_type=execution_type,
@@ -406,7 +487,7 @@ def _execute_code(
         problem_id=problem.id,
         execution_type=execution_type,
         code=payload.code,
-        timed_mode=payload.timed_mode,
+        timed_mode=effective_timed_mode,
         result=evaluation.result,
         failure_category=evaluation.failure_category,
         error_line=evaluation.error_line,
@@ -416,9 +497,16 @@ def _execute_code(
         feedback=evaluation.feedback,
     )
     db.add(submission)
+
+    if allow_expired_timed_submit:
+        progress_service.clear_timed_mode(progress)
+    elif effective_timed_mode and evaluation.result == "Pass":
+        progress_service.clear_timed_mode(progress)
+
     db.commit()
     db.refresh(submission)
     db.refresh(progress)
+    progress_snapshot = _serialize_progress(problem, progress)
 
     return SubmissionResponse(
         submission_id=str(submission.id),
@@ -432,6 +520,12 @@ def _execute_code(
         answer_key_unlocked=progress.answer_key_unlocked,
         feedback=evaluation.feedback,
         counts_toward_progress=execution_type == "Submit" and evaluation.result == "Fail" and evaluation.valid_attempt,
+        timed_mode_enabled=progress_snapshot.timed_mode_enabled,
+        timed_mode_status=progress_snapshot.timed_mode_status,
+        timed_mode_limit_seconds=progress_snapshot.timed_mode_limit_seconds,
+        timed_mode_remaining_seconds=progress_snapshot.timed_mode_remaining_seconds,
+        timed_mode_started_at=progress_snapshot.timed_mode_started_at,
+        timed_mode_expires_at=progress_snapshot.timed_mode_expires_at,
     )
 
 
@@ -459,6 +553,23 @@ def submit_code(
     return _execute_code(execution_type="Submit", payload=payload, user=user, db=db)
 
 
+@app.post("/submit/timed-expired", response_model=SubmissionResponse)
+def submit_expired_timed_code(
+    payload: SubmissionRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SubmissionResponse:
+    if not payload.timed_mode:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Timed auto-submit requires timed_mode=true.")
+    return _execute_code(
+        execution_type="Submit",
+        payload=payload,
+        user=user,
+        db=db,
+        allow_expired_timed_submit=True,
+    )
+
+
 @app.post("/submissions", response_model=SubmissionResponse)
 def submit_code_legacy(
     payload: SubmissionRequest,
@@ -471,6 +582,126 @@ def submit_code_legacy(
     # Backward-compatible alias for older clients that still post to
     # `/submissions`.
     return _execute_code(execution_type="Submit", payload=payload, user=user, db=db)
+
+
+@app.get("/progress/{problem_id}", response_model=ProblemProgressResponse)
+def get_problem_progress(
+    problem_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProblemProgressResponse:
+    problem = _get_visible_problem(problem_id, db)
+    progress = progress_service.get_or_create(db, user=user, problem=problem)
+    db.commit()
+    db.refresh(progress)
+    return _serialize_progress(problem, progress)
+
+
+@app.post("/progress/{problem_id}/timed-mode", response_model=ProblemProgressResponse)
+def enable_timed_mode(
+    problem_id: str,
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProblemProgressResponse:
+    problem = _get_visible_problem(problem_id, db)
+    progress = progress_service.get_or_create(db, user=user, problem=problem)
+    progress.timed_mode_enabled = True
+    progress.timed_mode_started_at = None
+    progress.timed_mode_expires_at = None
+    db.commit()
+    db.refresh(progress)
+    return _serialize_progress(problem, progress)
+
+
+@app.post("/progress/{problem_id}/timed-mode/start", response_model=ProblemProgressResponse)
+def start_timed_mode(
+    problem_id: str,
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProblemProgressResponse:
+    problem = _get_visible_problem(problem_id, db)
+    progress = progress_service.get_or_create(db, user=user, problem=problem)
+    progress_snapshot = _serialize_progress(problem, progress)
+
+    if not progress.timed_mode_enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Timed mode is not active for this problem.")
+    if progress_snapshot.timed_mode_status == "expired":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Timed mode has already expired for this problem.")
+    if progress_snapshot.timed_mode_status == "running":
+        return progress_snapshot
+
+    started_at = datetime.utcnow()
+    progress.timed_mode_started_at = started_at
+    progress.timed_mode_expires_at = started_at + timedelta(seconds=progress_snapshot.timed_mode_limit_seconds)
+    db.commit()
+    db.refresh(progress)
+    return _serialize_progress(problem, progress)
+
+
+@app.post("/progress/{problem_id}/timed-mode/pause", response_model=ProblemProgressResponse)
+def pause_timed_mode(
+    problem_id: str,
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProblemProgressResponse:
+    problem = _get_visible_problem(problem_id, db)
+    progress = progress_service.get_or_create(db, user=user, problem=problem)
+    progress_snapshot = _serialize_progress(problem, progress)
+
+    if not progress.timed_mode_enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Timed mode is not active for this problem.")
+    if progress_snapshot.timed_mode_status == "paused":
+        return progress_snapshot
+    if progress_snapshot.timed_mode_status != "running":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Timed mode can only be paused while the timer is running.")
+
+    progress.timed_mode_paused_at = datetime.utcnow()
+    db.commit()
+    db.refresh(progress)
+    return _serialize_progress(problem, progress)
+
+
+@app.post("/progress/{problem_id}/timed-mode/resume", response_model=ProblemProgressResponse)
+def resume_timed_mode(
+    problem_id: str,
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProblemProgressResponse:
+    problem = _get_visible_problem(problem_id, db)
+    progress = progress_service.get_or_create(db, user=user, problem=problem)
+    progress_snapshot = _serialize_progress(problem, progress)
+
+    if not progress.timed_mode_enabled:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Timed mode is not active for this problem.")
+    if progress_snapshot.timed_mode_status != "paused" or progress.timed_mode_paused_at is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Timed mode is not currently paused for this problem.")
+
+    paused_duration = datetime.utcnow() - progress.timed_mode_paused_at
+    if progress.timed_mode_expires_at is not None:
+        progress.timed_mode_expires_at = progress.timed_mode_expires_at + paused_duration
+    progress.timed_mode_paused_at = None
+    db.commit()
+    db.refresh(progress)
+    return _serialize_progress(problem, progress)
+
+
+@app.delete("/progress/{problem_id}/timed-mode", response_model=ProblemProgressResponse)
+def clear_timed_mode(
+    problem_id: str,
+    _csrf: None = Depends(require_csrf),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProblemProgressResponse:
+    problem = _get_visible_problem(problem_id, db)
+    progress = progress_service.get_or_create(db, user=user, problem=problem)
+    progress_service.clear_timed_mode(progress)
+    db.commit()
+    db.refresh(progress)
+    return _serialize_progress(problem, progress)
 
 
 @app.get("/hints", response_model=HintResponse)

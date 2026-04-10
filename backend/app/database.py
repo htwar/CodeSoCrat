@@ -61,6 +61,17 @@ def ensure_schema_evolution() -> None:
         if "updated_at" not in problem_columns:
             statements.append("ALTER TABLE problems ADD COLUMN updated_at DATETIME")
 
+    if "user_problem_progress" in table_names:
+        progress_columns = {column["name"] for column in inspector.get_columns("user_problem_progress")}
+        if "timed_mode_enabled" not in progress_columns:
+            statements.append("ALTER TABLE user_problem_progress ADD COLUMN timed_mode_enabled BOOLEAN DEFAULT 0")
+        if "timed_mode_started_at" not in progress_columns:
+            statements.append("ALTER TABLE user_problem_progress ADD COLUMN timed_mode_started_at DATETIME")
+        if "timed_mode_expires_at" not in progress_columns:
+            statements.append("ALTER TABLE user_problem_progress ADD COLUMN timed_mode_expires_at DATETIME")
+        if "timed_mode_paused_at" not in progress_columns:
+            statements.append("ALTER TABLE user_problem_progress ADD COLUMN timed_mode_paused_at DATETIME")
+
     if not statements:
         return
 
@@ -73,3 +84,5 @@ def ensure_schema_evolution() -> None:
             connection.execute(text("UPDATE problems SET updated_at = COALESCE(updated_at, created_at)"))
         if "users" in table_names:
             connection.execute(text("UPDATE users SET auth_provider = COALESCE(auth_provider, 'local')"))
+        if "user_problem_progress" in table_names:
+            connection.execute(text("UPDATE user_problem_progress SET timed_mode_enabled = COALESCE(timed_mode_enabled, 0)"))

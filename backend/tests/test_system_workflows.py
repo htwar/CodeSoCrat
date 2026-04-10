@@ -168,8 +168,13 @@ class SystemWorkflowTests(unittest.TestCase):
 
     def test_timed_submission_uses_same_submission_pipeline(self) -> None:
         # Timed mode should not invent a separate grading path; it should only
-        # mark the stored submission as timed.
+        # mark the stored submission as timed when the timer is active.
         self._login("student@codesocrat.dev", "studentpass")
+
+        arm = self.client.post("/progress/sum_two_numbers/timed-mode", headers=self._csrf_headers())
+        self.assertEqual(arm.status_code, 200)
+        start = self.client.post("/progress/sum_two_numbers/timed-mode/start", headers=self._csrf_headers())
+        self.assertEqual(start.status_code, 200)
 
         timed_submit = self.client.post(
             "/submit",

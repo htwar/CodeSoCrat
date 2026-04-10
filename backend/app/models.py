@@ -133,6 +133,10 @@ class UserProblemProgress(Base):
     answer_key_unlocked: Mapped[bool] = mapped_column(Boolean, default=False)
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
     last_failure_category: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    timed_mode_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    timed_mode_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    timed_mode_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    timed_mode_paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user: Mapped[User] = relationship(back_populates="progress_records")

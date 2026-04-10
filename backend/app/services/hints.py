@@ -70,15 +70,28 @@ class OllamaHintService:
         unlocked_stages: set[int],
         latest_submission: Optional[Submission],
     ) -> dict[int, str]:
-        # Hints are tied to a specific submission so refreshed pages reuse the
-        # same answer instead of generating slightly different wording.
-        if latest_submission is None:
+        # Once a learner reveals a hint for a problem, keep showing the most
+        # recently generated version of that stage until the problem progress
+        # is reset. Prefer the current submission's hint when it exists, then
+        # fall back to the newest cached hint from earlier attempts.
+        if not cached_hints:
             return {}
-        return {
-            hint.stage: hint.content
-            for hint in cached_hints
-            if hint.submission_id == latest_submission.id and hint.stage in unlocked_stages
-        }
+
+        generated_hints: dict[int, str] = {}
+        sorted_hints = sorted(
+            cached_hints,
+            key=lambda hint: (
+                1 if latest_submission is not None and hint.submission_id == latest_submission.id else 0,
+                hint.created_at,
+                hint.id,
+            ),
+            reverse=True,
+        )
+        for hint in sorted_hints:
+            if hint.stage not in unlocked_stages or hint.stage in generated_hints:
+                continue
+            generated_hints[hint.stage] = hint.content
+        return generated_hints
 
     def build_hint_response(self, *, unlocked_stages: set[int], generated_hints: dict[int, str], problem: Problem) -> dict[str, object]:
         # The frontend expects one payload with all unlocked stages so it can

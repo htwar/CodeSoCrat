@@ -102,6 +102,26 @@ class UnitServiceTests(unittest.TestCase):
         unlocked = service.get_unlocked_stages(progress)
         self.assertEqual(unlocked, {3})
 
+    def test_completed_problem_hides_previously_unlocked_hints(self) -> None:
+        # Passing a problem should return the hint panel to its normal locked
+        # state even if the learner had unlocked hints earlier.
+        from app.models import UserProblemProgress
+        from app.services.progress import ProgressService
+
+        service = ProgressService()
+        progress = UserProblemProgress(
+            user_id=1,
+            problem_id=1,
+            valid_failed_attempts=3,
+            answer_key_unlocked=False,
+            unlocked_stage=3,
+            completed=True,
+            last_failure_category="IncorrectOutput",
+        )
+
+        unlocked = service.get_unlocked_stages(progress)
+        self.assertEqual(unlocked, set())
+
     def test_problem_payload_validation_rejects_invalid_difficulty(self) -> None:
         # Upload payload validation is a unit concern too because bad author
         # data should fail before it ever reaches persistence.
@@ -210,6 +230,48 @@ class UnitServiceTests(unittest.TestCase):
             self.assertIn("7", test_cases[0].expected_json)
         finally:
             db.close()
+
+    def test_hint_cache_keeps_revealed_hints_visible_across_submissions(self) -> None:
+        # Once a learner reveals a hint for a problem, it should remain
+        # visible even after later submissions until the problem is reset.
+        from datetime import datetime, timedelta
+
+        from app.models import GeneratedHint, Submission
+        from app.services.hints import OllamaHintService
+
+        service = OllamaHintService()
+        older_submission = Submission(id=10, user_id=1, problem_id=1, execution_type="Submit", code="x", timed_mode=False, result="Fail", failure_category="IncorrectOutput", feedback="older")
+        latest_submission = Submission(id=11, user_id=1, problem_id=1, execution_type="Submit", code="y", timed_mode=False, result="Fail", failure_category="IncorrectOutput", feedback="latest")
+
+        cached_hints = [
+            GeneratedHint(
+                id=1,
+                user_id=1,
+                problem_id=1,
+                submission_id=older_submission.id,
+                stage=1,
+                content="Older conceptual hint",
+                created_at=datetime.utcnow() - timedelta(minutes=2),
+            ),
+            GeneratedHint(
+                id=2,
+                user_id=1,
+                problem_id=1,
+                submission_id=latest_submission.id,
+                stage=2,
+                content="Latest strategic hint",
+                created_at=datetime.utcnow() - timedelta(minutes=1),
+            ),
+        ]
+
+        generated = service.get_cached_hints(
+            cached_hints=cached_hints,
+            unlocked_stages={1, 2},
+            latest_submission=latest_submission,
+        )
+
+        self.assertEqual(generated[1], "Older conceptual hint")
+        self.assertEqual(generated[2], "Latest strategic hint")
 
 
 if __name__ == "__main__":

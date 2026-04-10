@@ -132,6 +132,13 @@ class SubmissionResponse(StrictModel):
     answer_key_unlocked: bool
     feedback: str
     counts_toward_progress: bool
+    timed_mode_enabled: bool = False
+    timed_mode_status: str = "off"
+    timed_mode_limit_seconds: int = 0
+    timed_mode_remaining_seconds: int = 0
+    timed_mode_started_at: Optional[str] = None
+    timed_mode_expires_at: Optional[str] = None
+    timed_mode_paused_at: Optional[str] = None
 
 
 class HintResponse(StrictModel):
@@ -283,6 +290,21 @@ class ProblemUpdateResponse(StrictModel):
 class ResetProgressResponse(StrictModel):
     success: bool
     problem_id: str
+
+
+class ProblemProgressResponse(StrictModel):
+    problem_id: str
+    valid_failed_attempts: int
+    unlocked_stage: int
+    answer_key_unlocked: bool
+    completed: bool
+    timed_mode_enabled: bool
+    timed_mode_status: str
+    timed_mode_limit_seconds: int
+    timed_mode_remaining_seconds: int
+    timed_mode_started_at: Optional[str] = None
+    timed_mode_expires_at: Optional[str] = None
+    timed_mode_paused_at: Optional[str] = None
 
 
 class AuthorProblemListResponse(StrictModel):

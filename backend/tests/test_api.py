@@ -250,6 +250,24 @@ class BackendFlowTests(unittest.TestCase):
         after_logout = self.client.get("/auth/session")
         self.assertEqual(after_logout.status_code, 401)
 
+    def test_logout_resets_active_timed_mode_state(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+
+        armed = self.client.post("/progress/sum_two_numbers/timed-mode", headers=self._csrf_headers())
+        self.assertEqual(armed.status_code, 200)
+        started = self.client.post("/progress/sum_two_numbers/timed-mode/start", headers=self._csrf_headers())
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(started.json()["timed_mode_status"], "running")
+
+        logout = self.client.post("/auth/logout", headers=self._csrf_headers())
+        self.assertEqual(logout.status_code, 204)
+
+        self._login("student@codesocrat.dev", "studentpass")
+        progress = self.client.get("/progress/sum_two_numbers")
+        self.assertEqual(progress.status_code, 200)
+        self.assertEqual(progress.json()["timed_mode_status"], "off")
+        self.assertFalse(progress.json()["timed_mode_enabled"])
+
     def test_state_change_without_csrf_is_rejected(self) -> None:
         # Authenticated users still need a matching CSRF token for protected
         # state-changing operations.
@@ -317,12 +335,12 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(hints.status_code, 403)
         self.assertEqual(hints.json()["detail"], "No hints unlocked yet.")
 
-    def test_answer_key_unlocks_after_three_valid_failed_submits(self) -> None:
+    def test_answer_key_unlocks_after_four_valid_failed_submits(self) -> None:
         # Repeated valid failed submits should escalate support gradually until
         # the answer key becomes available.
         self._login("student@codesocrat.dev", "studentpass")
 
-        for _ in range(3):
+        for _ in range(4):
             response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
             self.assertEqual(response.status_code, 200)
 
@@ -332,6 +350,26 @@ class BackendFlowTests(unittest.TestCase):
         self.assertTrue(payload["unlocked"])
         self.assertIn("def add_numbers", payload["solution_code"])
         self.assertTrue(payload["explanation"])
+
+    def test_hints_reset_to_locked_view_after_problem_is_passed(self) -> None:
+        # Once the learner passes a problem, the hint panel should go back to
+        # its normal locked state for that solved problem.
+        self._login("student@codesocrat.dev", "studentpass")
+
+        failed = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
+        self.assertEqual(failed.status_code, 200)
+
+        unlocked = self.client.get("/hints", params={"problem_id": "sum_two_numbers", "stage": 1})
+        self.assertEqual(unlocked.status_code, 200)
+        self.assertEqual(unlocked.json()["conceptual"], "generated-stage-1")
+
+        passed = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a + b\n")
+        self.assertEqual(passed.status_code, 200)
+        self.assertEqual(passed.json()["result"], "Pass")
+
+        hints = self.client.get("/hints", params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(hints.status_code, 403)
+        self.assertEqual(hints.json()["detail"], "No hints unlocked yet.")
 
     def test_syntax_failure_unlocks_only_syntactic_hint(self) -> None:
         # Syntax mistakes should route students directly toward syntactic help
@@ -622,6 +660,139 @@ class BackendFlowTests(unittest.TestCase):
         hints = self.client.get("/hints", params={"problem_id": "sum_two_numbers"})
         self.assertEqual(hints.status_code, 403)
         self.assertEqual(hints.json()["detail"], "No hints unlocked yet.")
+
+    def test_timed_mode_can_be_armed_started_and_reflected_in_progress(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+
+        armed = self.client.post("/progress/sum_two_numbers/timed-mode", headers=self._csrf_headers())
+        self.assertEqual(armed.status_code, 200)
+        self.assertTrue(armed.json()["timed_mode_enabled"])
+        self.assertEqual(armed.json()["timed_mode_status"], "ready")
+
+        started = self.client.post("/progress/sum_two_numbers/timed-mode/start", headers=self._csrf_headers())
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(started.json()["timed_mode_status"], "running")
+        self.assertGreater(started.json()["timed_mode_remaining_seconds"], 0)
+
+        progress = self.client.get("/progress/sum_two_numbers")
+        self.assertEqual(progress.status_code, 200)
+        self.assertEqual(progress.json()["timed_mode_status"], "running")
+
+    def test_timed_mode_can_pause_and_resume_around_hint_generation(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+
+        self.client.post("/progress/sum_two_numbers/timed-mode", headers=self._csrf_headers())
+        started = self.client.post("/progress/sum_two_numbers/timed-mode/start", headers=self._csrf_headers())
+        self.assertEqual(started.status_code, 200)
+        running_remaining = started.json()["timed_mode_remaining_seconds"]
+
+        paused = self.client.post("/progress/sum_two_numbers/timed-mode/pause", headers=self._csrf_headers())
+        self.assertEqual(paused.status_code, 200)
+        self.assertEqual(paused.json()["timed_mode_status"], "paused")
+        self.assertLessEqual(paused.json()["timed_mode_remaining_seconds"], running_remaining)
+        self.assertIsNotNone(paused.json()["timed_mode_paused_at"])
+
+        blocked = self.client.post(
+            "/run",
+            headers=self._csrf_headers(),
+            json={
+                "problem_id": "sum_two_numbers",
+                "code": "def add_numbers(a, b):\n    return a + b\n",
+                "timed_mode": True,
+            },
+        )
+        self.assertEqual(blocked.status_code, 409)
+        self.assertIn("paused", blocked.json()["detail"])
+
+        resumed = self.client.post("/progress/sum_two_numbers/timed-mode/resume", headers=self._csrf_headers())
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(resumed.json()["timed_mode_status"], "running")
+        self.assertIsNone(resumed.json()["timed_mode_paused_at"])
+
+    def test_expired_timed_mode_blocks_further_submissions(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+        self.client.post("/progress/sum_two_numbers/timed-mode", headers=self._csrf_headers())
+        self.client.post("/progress/sum_two_numbers/timed-mode/start", headers=self._csrf_headers())
+
+        db = self.SessionLocal()
+        try:
+            from datetime import datetime, timedelta
+            from app.models import Problem, User, UserProblemProgress
+
+            user = db.query(User).filter(User.email == "student@codesocrat.dev").first()
+            problem = db.query(Problem).filter(Problem.problem_id == "sum_two_numbers").first()
+            progress = db.query(UserProblemProgress).filter(
+                UserProblemProgress.user_id == user.id,
+                UserProblemProgress.problem_id == problem.id,
+            ).first()
+            self.assertIsNotNone(progress)
+            progress.timed_mode_enabled = True
+            progress.timed_mode_started_at = datetime.utcnow() - timedelta(minutes=10)
+            progress.timed_mode_expires_at = datetime.utcnow() - timedelta(seconds=1)
+            db.commit()
+        finally:
+            db.close()
+
+        blocked = self.client.post(
+            "/submit",
+            headers=self._csrf_headers(),
+            json={
+                "problem_id": "sum_two_numbers",
+                "code": "def add_numbers(a, b):\n    return a + b\n",
+                "timed_mode": True,
+            },
+        )
+        self.assertEqual(blocked.status_code, 409)
+        self.assertIn("expired", blocked.json()["detail"])
+
+    def test_expired_timed_mode_can_auto_submit_once(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+        self.client.post("/progress/sum_two_numbers/timed-mode", headers=self._csrf_headers())
+        self.client.post("/progress/sum_two_numbers/timed-mode/start", headers=self._csrf_headers())
+
+        db = self.SessionLocal()
+        try:
+            from datetime import datetime, timedelta
+            from app.models import Problem, User, UserProblemProgress
+
+            user = db.query(User).filter(User.email == "student@codesocrat.dev").first()
+            problem = db.query(Problem).filter(Problem.problem_id == "sum_two_numbers").first()
+            progress = db.query(UserProblemProgress).filter(
+                UserProblemProgress.user_id == user.id,
+                UserProblemProgress.problem_id == problem.id,
+            ).first()
+            self.assertIsNotNone(progress)
+            progress.timed_mode_enabled = True
+            progress.timed_mode_started_at = datetime.utcnow() - timedelta(minutes=10)
+            progress.timed_mode_expires_at = datetime.utcnow() - timedelta(seconds=1)
+            db.commit()
+        finally:
+            db.close()
+
+        auto_submit = self.client.post(
+            "/submit/timed-expired",
+            headers=self._csrf_headers(),
+            json={
+                "problem_id": "sum_two_numbers",
+                "code": "def add_numbers(a, b):\n    return a - b\n",
+                "timed_mode": True,
+            },
+        )
+        self.assertEqual(auto_submit.status_code, 200)
+        self.assertEqual(auto_submit.json()["execution_type"], "Submit")
+        self.assertFalse(auto_submit.json()["timed_mode_enabled"])
+
+    def test_timed_auto_submit_requires_timed_mode_flag(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+        response = self.client.post(
+            "/submit/timed-expired",
+            json={
+                "problem_id": "sum_two_numbers",
+                "code": "def add_numbers(a, b):\n    return a + b\n",
+                "timed_mode": False,
+            },
+        )
+        self.assertEqual(response.status_code, 400)
 
 
 if __name__ == "__main__":

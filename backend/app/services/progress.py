@@ -47,9 +47,9 @@ class ProgressService:
 
         if valid_attempt:
             progress.valid_failed_attempts += 1
-        # The SRS unlocks the answer key after three valid failed submits for
+        # The SRS unlocks the answer key after four valid failed submits for
         # the same user/problem pair.
-        if progress.valid_failed_attempts >= 3:
+        if progress.valid_failed_attempts >= 4:
             progress.answer_key_unlocked = True
 
         progress.unlocked_stage = max(self.get_unlocked_stages(progress), default=0)
@@ -59,6 +59,9 @@ class ProgressService:
     def get_unlocked_stages(self, progress: UserProblemProgress) -> set[int]:
         # Hint stages unlock progressively, with syntax issues fast-tracking the
         # syntactic hint so students can get unstuck sooner.
+        if progress.completed:
+            return set()
+
         unlocked_stages: set[int] = set()
 
         if progress.valid_failed_attempts >= 1:
@@ -72,3 +75,10 @@ class ProgressService:
             unlocked_stages.add(3)
 
         return unlocked_stages
+
+    def clear_timed_mode(self, progress: UserProblemProgress) -> UserProblemProgress:
+        progress.timed_mode_enabled = False
+        progress.timed_mode_started_at = None
+        progress.timed_mode_expires_at = None
+        progress.timed_mode_paused_at = None
+        return progress

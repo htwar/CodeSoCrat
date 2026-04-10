@@ -319,6 +319,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .dashboard {
@@ -414,7 +415,8 @@ button:disabled {
 
 .source-pill,
 .status-pill,
-.auth-provider-pill {
+.auth-provider-pill,
+.role-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -443,7 +445,8 @@ button:disabled {
 }
 
 .status-pill.inactive,
-.auth-provider-pill {
+.auth-provider-pill,
+.role-pill {
   background: rgba(30, 29, 26, 0.08);
   color: var(--muted);
 }
@@ -457,6 +460,15 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.9fr);
   gap: 20px;
+  align-items: start;
+}
+
+.hints-panel {
+  position: sticky;
+  top: 20px;
+  align-self: start;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
 }
 
 .workspace-heading {
@@ -664,6 +676,70 @@ button:disabled {
   border-color: rgba(190, 79, 44, 0.6);
   box-shadow: inset 0 0 0 1px rgba(190, 79, 44, 0.2);
   background: linear-gradient(135deg, rgba(190, 79, 44, 0.08), rgba(255, 250, 241, 0.95));
+}
+
+.hint-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.hint-kicker {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hint-summary {
+  margin: 10px 0 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.hint-placeholder,
+.hint-paragraph {
+  margin: 0;
+  line-height: 1.65;
+}
+
+.hint-feedback {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(30, 29, 26, 0.08);
+}
+
+.hint-points {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 10px;
+  line-height: 1.6;
+}
+
+.hint-status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.hint-status.unlocked {
+  color: var(--success);
+  background: rgba(32, 96, 71, 0.11);
+}
+
+.hint-status.locked {
+  color: var(--muted);
+  background: rgba(30, 29, 26, 0.06);
 }
 
 /* Author dashboard controls and cards. */

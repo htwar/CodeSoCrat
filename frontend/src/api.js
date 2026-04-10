@@ -168,6 +168,47 @@ export async function submitCode(payload) {
   });
 }
 
+export async function submitExpiredTimedCode(payload) {
+  return request("/submit/timed-expired", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getProblemProgress(problemId) {
+  return request(`/progress/${encodeURIComponent(problemId)}`);
+}
+
+export async function enableTimedMode(problemId) {
+  return request(`/progress/${encodeURIComponent(problemId)}/timed-mode`, {
+    method: "POST",
+  });
+}
+
+export async function startTimedMode(problemId) {
+  return request(`/progress/${encodeURIComponent(problemId)}/timed-mode/start`, {
+    method: "POST",
+  });
+}
+
+export async function clearTimedMode(problemId) {
+  return request(`/progress/${encodeURIComponent(problemId)}/timed-mode`, {
+    method: "DELETE",
+  });
+}
+
+export async function pauseTimedMode(problemId) {
+  return request(`/progress/${encodeURIComponent(problemId)}/timed-mode/pause`, {
+    method: "POST",
+  });
+}
+
+export async function resumeTimedMode(problemId) {
+  return request(`/progress/${encodeURIComponent(problemId)}/timed-mode/resume`, {
+    method: "POST",
+  });
+}
+
 // Hint, answer-key, and author problem management endpoints.
 export async function getHints(problemId, stage) {
   // Get the currently available hints, or generate one specific unlocked stage.

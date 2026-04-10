@@ -1,23 +1,30 @@
 import Editor from "@monaco-editor/react";
 import { useEffect, useRef, useState } from "react";
 import {
+  clearTimedMode,
   deleteProblem,
   disableProblem,
   enableProblem,
+  enableTimedMode,
   getAnswerKey,
   getAuthorProblem,
   getAuthorProblems,
   getGoogleConfig,
   getHints,
+  getProblemProgress,
   getProblems,
   getSession,
   googleAuth,
   login,
   logout,
+  pauseTimedMode,
   register,
   resetProgress,
+  resumeTimedMode,
   runCode,
+  startTimedMode,
   submitCode,
+  submitExpiredTimedCode,
   updateProblem,
   uploadProblem,
   uploadProblemFile,
@@ -61,9 +68,14 @@ const AUTHOR_FILTERS = [
 ];
 const HINT_TYPE_LABELS = {
   0: "None",
-  1: "Conceptual",
+  1: "None",
   2: "Strategic",
   3: "Syntactic",
+};
+const HINT_TYPE_SUMMARIES = {
+  1: "Focus on the main idea behind the problem before changing code.",
+  2: "Use this to choose your next debugging or problem-solving step.",
+  3: "Use this to inspect the code shape, syntax, or exact failing area.",
 };
 const WORKSPACE_STORAGE_PREFIX = "codesocrat_workspace_v1";
 
@@ -79,6 +91,28 @@ function getWorkspaceStorageKey(userId) {
   // Keep each signed-in user's saved editor/timer state isolated in localStorage.
   // Keep each signed-in user's saved editor/timer state isolated in localStorage.
   return `${WORKSPACE_STORAGE_PREFIX}:${userId}`;
+}
+
+function getExpectedTimeLimit(problem) {
+  return TIME_LIMITS[problem.difficulty] || TIME_LIMITS.Easy;
+}
+
+function normalizeHintLines(content) {
+  if (!content) {
+    return [];
+  }
+
+  return content
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      const normalizedLine = line.replace(/^[*-]\s*/, "").trim();
+      return normalizedLine
+        .split(/\s+-\s+/)
+        .map((segment) => segment.trim())
+        .filter(Boolean);
+    });
 }
 
 function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, loading, error }) {
@@ -133,13 +167,10 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
         <button
           type="button"
           id="auth-tab-login"
-          id="auth-tab-login"
           className={mode === "login" ? "toggle-button active" : "toggle-button"}
           onClick={() => setMode("login")}
           role="tab"
           aria-selected={mode === "login"}
-          aria-controls="auth-form-panel"
-          tabIndex={mode === "login" ? 0 : -1}
           aria-controls="auth-form-panel"
           tabIndex={mode === "login" ? 0 : -1}
         >
@@ -148,20 +179,16 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
         <button
           type="button"
           id="auth-tab-register"
-          id="auth-tab-register"
           className={mode === "register" ? "toggle-button active" : "toggle-button"}
           onClick={() => setMode("register")}
           role="tab"
           aria-selected={mode === "register"}
           aria-controls="auth-form-panel"
           tabIndex={mode === "register" ? 0 : -1}
-          aria-controls="auth-form-panel"
-          tabIndex={mode === "register" ? 0 : -1}
         >
           Create account
         </button>
       </div>
-      <form className="auth-form" id="auth-form-panel" onSubmit={handleSubmit}>
       <form className="auth-form" id="auth-form-panel" onSubmit={handleSubmit}>
         <label htmlFor="auth-email">Email</label>
         <input
@@ -209,7 +236,6 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
         <p className="meta-copy">Google sign-in becomes available after `CODESOCRAT_GOOGLE_CLIENT_ID` is configured.</p>
       )}
       <p className="status-text" role="status" aria-live="polite">
-      <p className="status-text" role="status" aria-live="polite">
         {error || ""}
       </p>
       <div className="account-hints">
@@ -222,14 +248,11 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
 
 function ProblemList({ problems, selectedDifficulty, selectedProblemId, onDifficultyChange, onSelect }) {
   // Left-hand catalog used to switch between available coding problems.
-  // Left-hand catalog used to switch between available coding problems.
   return (
-    <aside className="panel problem-list" aria-labelledby="problem-list-title">
     <aside className="panel problem-list" aria-labelledby="problem-list-title">
       <div className="panel-header">
         <div>
           <p className="eyebrow">Problem Set</p>
-          <h2 id="problem-list-title">Choose a challenge</h2>
           <h2 id="problem-list-title">Choose a challenge</h2>
         </div>
       </div>
@@ -239,13 +262,10 @@ function ProblemList({ problems, selectedDifficulty, selectedProblemId, onDiffic
             key={difficulty}
             type="button"
             id={`difficulty-tab-${difficulty}`}
-            id={`difficulty-tab-${difficulty}`}
             className={selectedDifficulty === difficulty ? "difficulty-chip active" : "difficulty-chip"}
             onClick={() => onDifficultyChange(difficulty)}
             role="tab"
             aria-selected={selectedDifficulty === difficulty}
-            aria-controls="workspace-panel"
-            tabIndex={selectedDifficulty === difficulty ? 0 : -1}
             aria-controls="workspace-panel"
             tabIndex={selectedDifficulty === difficulty ? 0 : -1}
           >
@@ -279,7 +299,6 @@ function SubmissionPanel({
   onRun,
   onSubmit,
   onResetProgress,
-  onResetToStarter,
   onLoadDemo,
   timedChallenge,
   onEnableTimedMode,
@@ -291,11 +310,9 @@ function SubmissionPanel({
   onUnlockHint,
 }) {
   // Main learner workspace: prompt, timer, code editor, run/submit actions,
-  // and the latest result state.
   // Main learner workspace: prompt, timer, code editor, run/submit actions,
   // and the latest result state.
   const editorOptions = {
-    ariaLabel: problem ? `${problem.title} Python editor` : "Python editor",
     ariaLabel: problem ? `${problem.title} Python editor` : "Python editor",
     automaticLayout: true,
     fontSize: 15,
@@ -322,7 +339,6 @@ function SubmissionPanel({
   return (
     <section className="workspace-grid">
       <div className="panel workspace-panel" id="workspace-panel" tabIndex="-1" aria-labelledby="workspace-problem-title">
-      <div className="panel workspace-panel" id="workspace-panel" tabIndex="-1" aria-labelledby="workspace-problem-title">
         <div className="panel-header">
           <div className="workspace-heading">
             <p className="eyebrow">{problem.difficulty}</p>
@@ -335,9 +351,6 @@ function SubmissionPanel({
             </div>
           </div>
           <div className="panel-actions">
-            <button type="button" className="secondary-button" onClick={onResetToStarter}>
-              Reset to Starter
-            </button>
             <button type="button" className="danger-button" onClick={onResetProgress}>
               Reset Progress
             </button>
@@ -382,22 +395,24 @@ function SubmissionPanel({
               <h3 id="timed-mode-title">
                 {timedChallenge.status === "running"
                   ? "Timed challenge in progress"
-                  : timedChallenge.status === "expiring"
-                    ? "Submitting timed challenge"
+                  : timedChallenge.status === "paused"
+                    ? "Timer paused for hint generation"
                   : timedChallenge.status === "expired"
                     ? "Time is up"
-                    : timedChallenge.status === "completed"
+                  : timedChallenge.status === "completed"
                       ? "Timed challenge completed"
                       : "Ready when you start typing"}
               </h3>
               <p className="meta-copy">
                 {timedChallenge.status === "completed"
                   ? "You finished the timed challenge. Open it again whenever you want another pressure run."
-                  : timedChallenge.status === "expiring"
-                    ? "The timer reached zero and your latest saved code is being submitted automatically."
+                  : timedChallenge.status === "paused"
+                    ? "The countdown is paused while your hint is being generated. It will resume automatically when the hint is ready."
                   : timedChallenge.status === "ready"
                     ? `The ${formatSeconds(timedChallenge.limitSeconds)} countdown will begin as soon as you start editing in the code editor.`
-                    : `This ${problem.difficulty.toLowerCase()} problem gets ${formatSeconds(timedChallenge.limitSeconds)}. When time reaches 00:00, your current code is automatically submitted for grading.`}
+                  : timedChallenge.status === "expired"
+                    ? "The timer has expired. Further runs and submits stay locked until you clear or restart timed mode."
+                    : `This ${problem.difficulty.toLowerCase()} problem gets ${formatSeconds(timedChallenge.limitSeconds)}. Keep an eye on the countdown, because timed mode locks once it reaches 00:00.`}
               </p>
             </div>
             <div className="timer-actions">
@@ -413,7 +428,7 @@ function SubmissionPanel({
               {timedChallenge.status === "ready" ? (
                 <p className="timer-support">The timer starts on your first keystroke.</p>
               ) : null}
-              {timedChallenge.status === "running" ? (
+              {["running", "paused"].includes(timedChallenge.status) ? (
                 <button type="button" className="ghost-button" onClick={onDisableTimedMode}>
                   Stop Timed Mode
                 </button>
@@ -438,18 +453,18 @@ function SubmissionPanel({
           />
         </div>
         <div className="editor-actions">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onRun}
-            disabled={Boolean(submissionState.loadingAction) || ["expired", "expiring"].includes(timedChallenge.status)}
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={onRun}
+            disabled={Boolean(submissionState.loadingAction) || ["expired", "paused"].includes(timedChallenge.status)}
           >
             {submissionState.loadingAction === "Run" ? "Running..." : "Run"}
           </button>
           <button
             type="button"
             onClick={onSubmit}
-            disabled={Boolean(submissionState.loadingAction) || ["expired", "expiring"].includes(timedChallenge.status)}
+            disabled={Boolean(submissionState.loadingAction) || ["expired", "paused"].includes(timedChallenge.status)}
           >
             {submissionState.loadingAction === "Submit" ? "Submitting..." : "Submit"}
           </button>
@@ -458,19 +473,14 @@ function SubmissionPanel({
           </button>
         </div>
         {timedChallenge.message ? <p className="success-text" role="status" aria-live="polite">{timedChallenge.message}</p> : null}
-        {timedChallenge.message ? <p className="success-text" role="status" aria-live="polite">{timedChallenge.message}</p> : null}
-        {timedChallenge.status === "expiring" ? (
-          <p className="meta-copy" role="status" aria-live="polite">Auto-submitting your timed attempt now.</p>
-          <p className="meta-copy" role="status" aria-live="polite">Auto-submitting your timed attempt now.</p>
-        ) : null}
         {timedChallenge.status === "expired" ? (
-          <p className="error-text" role="alert">Time expired. Your current code was submitted automatically, and further submissions are locked until you clear timed mode.</p>
-          <p className="error-text" role="alert">Time expired. Your current code was submitted automatically, and further submissions are locked until you clear timed mode.</p>
+          <p className="error-text" role="alert">Time expired. Further runs and submits are locked until you clear timed mode.</p>
         ) : null}
-        {submissionState.error ? <p className="error-text" role="alert">{submissionState.error}</p> : null}
+        {timedChallenge.status === "paused" ? (
+          <p className="meta-copy" role="status" aria-live="polite">Timed mode is paused while the selected hint loads.</p>
+        ) : null}
         {submissionState.error ? <p className="error-text" role="alert">{submissionState.error}</p> : null}
         {submissionState.result ? (
-          <div className={submissionState.result.result === "Pass" ? "result-card pass" : "result-card fail"} role="status" aria-live="polite">
           <div className={submissionState.result.result === "Pass" ? "result-card pass" : "result-card fail"} role="status" aria-live="polite">
             <h3>{submissionState.result.result}</h3>
             <p>{submissionState.result.feedback}</p>
@@ -486,15 +496,12 @@ function SubmissionPanel({
       </div>
 
       <div className="panel hints-panel" aria-labelledby="hints-panel-title">
-      <div className="panel hints-panel" aria-labelledby="hints-panel-title">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Feedback</p>
             <h2 id="hints-panel-title">Hints</h2>
-            <h2 id="hints-panel-title">Hints</h2>
           </div>
         </div>
-        {hintState.error ? <p className="error-text" role="alert">{hintState.error}</p> : null}
         {hintState.error ? <p className="error-text" role="alert">{hintState.error}</p> : null}
         <HintCard title="Conceptual" stage={1} hintState={hintState} onUnlockHint={onUnlockHint} />
         <HintCard title="Strategic" stage={2} hintState={hintState} onUnlockHint={onUnlockHint} />
@@ -507,10 +514,10 @@ function SubmissionPanel({
 
 function HintCard({ title, stage, hintState, onUnlockHint }) {
   // Reusable card for one hint tier, including unlock/reveal behavior.
-  // Reusable card for one hint tier, including unlock/reveal behavior.
   const hints = hintState.hints || {};
   const stageKey = stage === 1 ? "conceptual" : stage === 2 ? "strategic" : "syntactic";
   const content = hints[stageKey];
+  const contentLines = normalizeHintLines(content);
   const unlockedStages = hints.unlocked_stages || [];
   const isUnlocked = unlockedStages.includes(stage);
   const isHighlighted = isUnlocked && hints.highlight_stage === stage;
@@ -518,15 +525,37 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
 
   return (
     <article className={["hint-card", content ? "unlocked" : "locked", isHighlighted ? "highlighted" : ""].join(" ").trim()} aria-live={content ? "polite" : "off"}>
-    <article className={["hint-card", content ? "unlocked" : "locked", isHighlighted ? "highlighted" : ""].join(" ").trim()} aria-live={content ? "polite" : "off"}>
-      <h3>{title}</h3>
-      <p>
-        {content
-          ? content
-          : isUnlocked
+      <div className="hint-card-header">
+        <div>
+          <p className="hint-kicker">{title} Hint</p>
+          <h3>{title}</h3>
+        </div>
+        <span className={isUnlocked ? "hint-status unlocked" : "hint-status locked"}>
+          {content ? "Revealed" : isUnlocked ? "Ready" : "Locked"}
+        </span>
+      </div>
+      <p className="hint-summary">
+        {HINT_TYPE_SUMMARIES[stage]}
+      </p>
+      {content ? (
+        <div className="hint-feedback">
+          {contentLines.length > 1 ? (
+            <ul className="hint-points">
+              {contentLines.map((line, index) => (
+                <li key={`${stageKey}-line-${index}`}>{line}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="hint-paragraph">{contentLines[0] || content}</p>
+          )}
+        </div>
+      ) : (
+        <p className="hint-placeholder">
+          {isUnlocked
             ? "This hint is unlocked and ready. Reveal it when you want more guidance."
             : "Locked until you earn this hint type."}
-      </p>
+        </p>
+      )}
       {isUnlocked && !content ? (
         <button type="button" className="secondary-button" onClick={() => onUnlockHint(stage)} disabled={isLoading}>
           {isLoading ? "Unlocking..." : "Unlock Hint"}
@@ -538,12 +567,10 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
 
 function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
   // Final help panel that reveals the stored solution only after unlock.
-  // Final help panel that reveals the stored solution only after unlock.
   const isUnlocked = answerKeyState.unlocked;
   const hasContent = Boolean(answerKeyState.content);
 
   return (
-    <article className={["hint-card", hasContent ? "unlocked" : "locked", isUnlocked ? "highlighted" : ""].join(" ").trim()} aria-live={hasContent ? "polite" : "off"}>
     <article className={["hint-card", hasContent ? "unlocked" : "locked", isUnlocked ? "highlighted" : ""].join(" ").trim()} aria-live={hasContent ? "polite" : "off"}>
       <h3>Answer Key</h3>
       {hasContent ? (
@@ -555,7 +582,6 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
               language="python"
               value={answerKeyState.content.solution_code}
               options={{
-                ariaLabel: "Reference solution code viewer",
                 ariaLabel: "Reference solution code viewer",
                 automaticLayout: true,
                 fontSize: 14,
@@ -575,10 +601,9 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
         <p>
           {isUnlocked
             ? "You have earned the answer key for this problem. Reveal it when you are ready to compare your work."
-            : "Locked until you reach three valid failed Submit attempts on this problem."}
+            : "Locked until you reach four valid failed Submit attempts on this problem."}
         </p>
       )}
-      {answerKeyState.error ? <p className="error-text" role="alert">{answerKeyState.error}</p> : null}
       {answerKeyState.error ? <p className="error-text" role="alert">{answerKeyState.error}</p> : null}
       {isUnlocked && !hasContent ? (
         <button type="button" className="secondary-button" onClick={onViewAnswerKey} disabled={answerKeyState.loading}>
@@ -607,12 +632,9 @@ function AuthorPanel({
 }) {
   // Author-only dashboard for browsing starter/custom problems and editing
   // custom JSON payloads.
-  // Author-only dashboard for browsing starter/custom problems and editing
-  // custom JSON payloads.
   const loadFileInputRef = useRef(null);
   const uploadFileInputRef = useRef(null);
   const authorEditorOptions = {
-    ariaLabel: "Problem JSON editor",
     ariaLabel: "Problem JSON editor",
     automaticLayout: true,
     fontSize: 14,
@@ -629,12 +651,9 @@ function AuthorPanel({
   return (
     <section className="author-layout" aria-label="Author dashboard">
       <section className="panel author-panel" aria-labelledby="author-library-title">
-    <section className="author-layout" aria-label="Author dashboard">
-      <section className="panel author-panel" aria-labelledby="author-library-title">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Author Dashboard</p>
-            <h2 id="author-library-title">Manage problem library</h2>
             <h2 id="author-library-title">Manage problem library</h2>
           </div>
           <button type="button" className="secondary-button" onClick={onCreateNew}>
@@ -647,13 +666,10 @@ function AuthorPanel({
               key={filterItem.id}
               type="button"
               id={`author-filter-${filterItem.id}`}
-              id={`author-filter-${filterItem.id}`}
               className={authorFilter === filterItem.id ? "difficulty-chip active" : "difficulty-chip"}
               onClick={() => onAuthorFilterChange(filterItem.id)}
               role="tab"
               aria-selected={authorFilter === filterItem.id}
-              aria-controls="author-problem-list"
-              tabIndex={authorFilter === filterItem.id ? 0 : -1}
               aria-controls="author-problem-list"
               tabIndex={authorFilter === filterItem.id ? 0 : -1}
             >
@@ -661,7 +677,6 @@ function AuthorPanel({
             </button>
           ))}
         </div>
-        <div className="problem-items" id="author-problem-list">
         <div className="problem-items" id="author-problem-list">
           {authorProblems.map((problem) => (
             <article key={problem.problem_id} className="author-problem-card">
@@ -704,11 +719,9 @@ function AuthorPanel({
       </section>
 
       <section className="panel author-panel" aria-labelledby="author-workspace-title">
-      <section className="panel author-panel" aria-labelledby="author-workspace-title">
         <div className="panel-header">
           <div>
             <p className="eyebrow">JSON Workspace</p>
-            <h2 id="author-workspace-title">{authorEditor.mode === "edit" ? `Editing ${authorEditor.problemId}` : "Upload one problem JSON file"}</h2>
             <h2 id="author-workspace-title">{authorEditor.mode === "edit" ? `Editing ${authorEditor.problemId}` : "Upload one problem JSON file"}</h2>
           </div>
         </div>
@@ -781,7 +794,6 @@ function AuthorPanel({
 
 function loadGoogleScriptOnce() {
   // Inject Google Identity Services once, then reuse the loaded script.
-  // Inject Google Identity Services once, then reuse the loaded script.
   return new Promise((resolve, reject) => {
     if (window.google?.accounts?.id) {
       resolve();
@@ -836,11 +848,11 @@ export default function App() {
   });
   const sessionRef = useRef(session);
   const codeByProblemRef = useRef(codeByProblem);
+  const timedStartInFlightRef = useRef({});
+  const timedAutoSubmitRef = useRef({});
 
-  // Keep refs aligned with the latest session and code so timer-triggered
-  // submissions always use the newest in-memory values.
-  // Keep refs aligned with the latest session and code so timer-triggered
-  // submissions always use the newest in-memory values.
+  // Keep refs aligned with the latest session and code so execution always
+  // uses the newest in-memory values.
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
@@ -849,10 +861,8 @@ export default function App() {
     codeByProblemRef.current = codeByProblem;
   }, [codeByProblem]);
 
-  // Restore the saved workspace for this user after refresh, including draft
-  // code and any timed challenge that was already in progress.
-  // Restore the saved workspace for this user after refresh, including draft
-  // code and any timed challenge that was already in progress.
+  // Restore only draft code from localStorage. Timed mode state is server-owned
+  // so refreshes cannot desync the countdown from backend enforcement.
   useEffect(() => {
     if (!session?.user_id || typeof window === "undefined") {
       return;
@@ -869,40 +879,13 @@ export default function App() {
         setCodeByProblem((current) => ({ ...parsed.codeByProblem, ...current }));
       }
 
-      if (parsed.timedChallengeByProblem && typeof parsed.timedChallengeByProblem === "object") {
-        const now = Date.now();
-        const restoredTimers = Object.fromEntries(
-          Object.entries(parsed.timedChallengeByProblem).map(([problemId, challenge]) => {
-            if (!challenge || typeof challenge !== "object") {
-              return [problemId, challenge];
-            }
-
-            if (challenge.status === "running" && challenge.expiresAt) {
-              const remainingSeconds = Math.max(0, Math.ceil((challenge.expiresAt - now) / 1000));
-              return [
-                problemId,
-                {
-                  ...challenge,
-                  remainingSeconds,
-                  status: remainingSeconds === 0 ? "expiring" : "running",
-                },
-              ];
-            }
-
-            return [problemId, challenge];
-          }),
-        );
-        setTimedChallengeByProblem(restoredTimers);
-      }
     } catch (_error) {
       // Ignore invalid persisted workspace state and continue with in-memory defaults.
     }
   }, [session?.user_id]);
 
-  // Persist draft code and timer state per signed-in user so a page reload does
-  // not wipe out work in progress.
-  // Persist draft code and timer state per signed-in user so a page reload does
-  // not wipe out work in progress.
+  // Persist draft code per signed-in user so a page reload does not wipe out
+  // work in progress.
   useEffect(() => {
     if (!session?.user_id || typeof window === "undefined") {
       return;
@@ -910,10 +893,9 @@ export default function App() {
 
     const payload = JSON.stringify({
       codeByProblem,
-      timedChallengeByProblem,
     });
     window.localStorage.setItem(getWorkspaceStorageKey(session.user_id), payload);
-  }, [session?.user_id, codeByProblem, timedChallengeByProblem]);
+  }, [session?.user_id, codeByProblem]);
 
   // Load Google auth configuration once so the login screen knows whether the
   // Google sign-in button should be rendered.
@@ -1057,8 +1039,8 @@ export default function App() {
     ? timedChallengeByProblem[selectedProblem.problem_id] || {
         enabled: false,
         status: "off",
-        remainingSeconds: TIME_LIMITS[selectedProblem.difficulty] || TIME_LIMITS.Easy,
-        limitSeconds: TIME_LIMITS[selectedProblem.difficulty] || TIME_LIMITS.Easy,
+        remainingSeconds: getExpectedTimeLimit(selectedProblem),
+        limitSeconds: getExpectedTimeLimit(selectedProblem),
         message: "",
       }
     : null;
@@ -1069,12 +1051,10 @@ export default function App() {
     }
     refreshHintState(selectedProblem.problem_id);
     refreshAnswerKeyState(selectedProblem.problem_id);
+    refreshTimedChallengeState(selectedProblem);
   }, [selectedProblemId, session]);
 
-  // Drive the active countdown timers and mark any timer that reaches zero so
-  // it can auto-submit on the next effect pass.
-  // Drive the active countdown timers and mark any timer that reaches zero so
-  // it can auto-submit on the next effect pass.
+  // Drive the visible countdown for any active server-owned timers.
   useEffect(() => {
     const hasRunningTimer = Object.values(timedChallengeByProblem).some((challenge) => challenge.status === "running");
     if (!hasRunningTimer) {
@@ -1082,7 +1062,6 @@ export default function App() {
     }
 
     const intervalId = window.setInterval(() => {
-      const expiredProblemIds = [];
       const now = Date.now();
       setTimedChallengeByProblem((current) => {
         const next = { ...current };
@@ -1096,20 +1075,10 @@ export default function App() {
           next[problemId] = {
             ...challenge,
             remainingSeconds: nextRemaining,
+            status: nextRemaining === 0 ? "expired" : "running",
           };
-          if (nextRemaining === 0) {
-            next[problemId] = {
-              ...next[problemId],
-              status: "expiring",
-            };
-            expiredProblemIds.push(problemId);
-          }
         });
         return next;
-      });
-
-      expiredProblemIds.forEach((problemId) => {
-        autoSubmitTimedChallenge(problemId);
       });
     }, 1000);
 
@@ -1118,21 +1087,45 @@ export default function App() {
     };
   }, [timedChallengeByProblem]);
 
-  // Auto-submit any timed problem whose countdown has just expired.
-  // Auto-submit any timed problem whose countdown has just expired.
   useEffect(() => {
-    const expiringProblemIds = Object.entries(timedChallengeByProblem)
-      .filter(([, challenge]) => challenge.status === "expiring")
-      .map(([problemId]) => problemId);
+    Object.entries(timedChallengeByProblem).forEach(([problemId, challenge]) => {
+      if (!challenge?.enabled || challenge.status !== "expired" || timedAutoSubmitRef.current[problemId]) {
+        return;
+      }
 
-    if (expiringProblemIds.length === 0) {
-      return;
-    }
+      timedAutoSubmitRef.current[problemId] = true;
+      const activeProblem = problems.find((problem) => problem.problem_id === problemId);
+      const code = codeByProblemRef.current[problemId] || "";
 
-    expiringProblemIds.forEach((problemId) => {
-      autoSubmitTimedChallenge(problemId);
+      submitExpiredTimedCode({ problem_id: problemId, code, timed_mode: true })
+        .then(async (response) => {
+          if (selectedProblem?.problem_id === problemId) {
+            setSubmissionState({ loadingAction: null, result: response, error: "" });
+            await refreshHintState(problemId);
+            await refreshAnswerKeyState(problemId);
+          }
+
+          if (activeProblem) {
+            setTimedChallenge(problemId, hydrateTimedChallenge(activeProblem, response, {
+              enabled: false,
+              status: response.result === "Pass" ? "completed" : "expired",
+              message: "Time expired and your latest code was submitted automatically.",
+            }));
+          }
+        })
+        .catch(async (error) => {
+          if (selectedProblem?.problem_id === problemId) {
+            setSubmissionState({ loadingAction: null, result: null, error: error.message });
+          }
+          if (activeProblem) {
+            await refreshTimedChallengeState(activeProblem);
+          }
+        })
+        .finally(() => {
+          delete timedAutoSubmitRef.current[problemId];
+        });
     });
-  }, [timedChallengeByProblem]);
+  }, [timedChallengeByProblem, problems, selectedProblem]);
 
   function updateCode(nextCode) {
     // Store editor changes under the currently selected problem id and arm the
@@ -1140,11 +1133,12 @@ export default function App() {
     if (!selectedProblem) {
       return;
     }
-    const activeChallenge = timedChallengeByProblem[selectedProblem.problem_id];
+    const problemId = selectedProblem.problem_id;
+    const activeChallenge = timedChallengeByProblem[problemId];
     if (activeChallenge?.enabled && activeChallenge.status === "ready") {
       const startedAt = Date.now();
-      const limitSeconds = activeChallenge.limitSeconds || TIME_LIMITS[selectedProblem.difficulty] || TIME_LIMITS.Easy;
-      setTimedChallenge(selectedProblem.problem_id, {
+      const limitSeconds = activeChallenge.limitSeconds || getExpectedTimeLimit(selectedProblem);
+      setTimedChallenge(problemId, {
         ...activeChallenge,
         status: "running",
         remainingSeconds: limitSeconds,
@@ -1153,10 +1147,23 @@ export default function App() {
         startedAt,
         expiresAt: startedAt + (limitSeconds * 1000),
       });
+      if (!timedStartInFlightRef.current[problemId]) {
+        timedStartInFlightRef.current[problemId] = true;
+        startTimedMode(problemId)
+          .then((response) => {
+            setTimedChallenge(problemId, hydrateTimedChallenge(selectedProblem, response));
+          })
+          .catch((error) => {
+            setTimedChallenge(problemId, buildTimedChallenge(selectedProblem, { message: error.message }));
+          })
+          .finally(() => {
+            delete timedStartInFlightRef.current[problemId];
+          });
+      }
     }
     setCodeByProblem((current) => ({
       ...current,
-      [selectedProblem.problem_id]: nextCode,
+      [problemId]: nextCode,
     }));
   }
 
@@ -1165,7 +1172,7 @@ export default function App() {
   // Build the default timer state for a problem using its difficulty-specific
   // time limit.
   function buildTimedChallenge(problem, overrides = {}) {
-    const limitSeconds = TIME_LIMITS[problem.difficulty] || TIME_LIMITS.Easy;
+    const limitSeconds = getExpectedTimeLimit(problem);
     return {
       enabled: false,
       status: "off",
@@ -1176,6 +1183,43 @@ export default function App() {
       expiresAt: null,
       ...overrides,
     };
+  }
+
+  function hydrateTimedChallenge(problem, progressPayload, overrides = {}) {
+    const fallback = buildTimedChallenge(problem);
+    if (!progressPayload) {
+      return { ...fallback, ...overrides };
+    }
+
+    const rawLimit = progressPayload.timed_mode_limit_seconds || fallback.limitSeconds;
+    const rawRemaining = progressPayload.timed_mode_remaining_seconds;
+    const shouldRepairLegacyReadyState =
+      ["off", "ready"].includes(progressPayload.timed_mode_status)
+      && rawLimit < 60
+      && fallback.limitSeconds >= 60;
+
+    return {
+      ...fallback,
+      enabled: progressPayload.timed_mode_enabled,
+      status: progressPayload.timed_mode_status,
+      remainingSeconds: shouldRepairLegacyReadyState ? fallback.limitSeconds : rawRemaining,
+      limitSeconds: shouldRepairLegacyReadyState ? fallback.limitSeconds : rawLimit,
+      startedAt: progressPayload.timed_mode_started_at ? Date.parse(progressPayload.timed_mode_started_at) : null,
+      expiresAt: progressPayload.timed_mode_expires_at ? Date.parse(progressPayload.timed_mode_expires_at) : null,
+      ...overrides,
+    };
+  }
+
+  async function clearProblemTimer(problem) {
+    if (!problem) {
+      return;
+    }
+    try {
+      await clearTimedMode(problem.problem_id);
+    } catch (_error) {
+      // Ignore cleanup failures and still reset the local timer card.
+    }
+    setTimedChallenge(problem.problem_id, buildTimedChallenge(problem));
   }
 
   function resetAuthorEditor(nextJson = starterUploadTemplate) {
@@ -1291,7 +1335,6 @@ export default function App() {
 
   async function refreshAnswerKeyState(problemId) {
     // Re-check whether the answer key is unlocked and cache it if visible.
-    // Re-check whether the answer key is unlocked and cache it if visible.
     try {
       const response = await getAnswerKey(problemId);
       setAnswerKeyState({
@@ -1305,12 +1348,21 @@ export default function App() {
     }
   }
 
+  async function refreshTimedChallengeState(problem) {
+    try {
+      const response = await getProblemProgress(problem.problem_id);
+      setTimedChallenge(problem.problem_id, hydrateTimedChallenge(problem, response));
+    } catch (_error) {
+      setTimedChallenge(problem.problem_id, buildTimedChallenge(problem));
+    }
+  }
+
   // Route all run, submit, and auto-submit paths through the same helper so
   // evaluation behavior stays consistent.
   // Route all run, submit, and auto-submit paths through the same helper so
   // evaluation behavior stays consistent.
   async function executeCode(action, options = {}) {
-    const { forcedProblemId = null, timedMode = false, autoTriggered = false } = options;
+    const { forcedProblemId = null, timedMode = false } = options;
     const activeSession = sessionRef.current;
     const problemId = forcedProblemId || selectedProblem?.problem_id;
     if (!problemId || !activeSession) {
@@ -1318,6 +1370,7 @@ export default function App() {
     }
     const code = codeByProblemRef.current[problemId] || "";
     const isSelectedProblem = selectedProblem?.problem_id === problemId;
+    const activeProblem = isSelectedProblem ? selectedProblem : problems.find((problem) => problem.problem_id === problemId);
 
     if (isSelectedProblem) {
       setSubmissionState({ loadingAction: action, result: null, error: "" });
@@ -1338,50 +1391,25 @@ export default function App() {
         await refreshHintState(problemId);
         await refreshAnswerKeyState(problemId);
       }
-      if (timedMode && response.result === "Pass") {
-        setTimedChallenge(problemId, (current) => ({
-          ...(current || buildTimedChallenge(selectedProblem || { difficulty: "Easy" })),
-          enabled: false,
-          status: "completed",
-          message: autoTriggered ? "Timed submission finished successfully." : "Timed challenge passed before the clock ran out.",
-          expiresAt: null,
-          startedAt: null,
-        }));
-      } else if (timedMode) {
-        setTimedChallenge(problemId, (current) => ({
-          ...(current || buildTimedChallenge(selectedProblem || { difficulty: "Easy" })),
-          enabled: false,
-          status: autoTriggered ? "expired" : "ready",
-          message: autoTriggered ? "Time expired and your latest code was submitted automatically." : "",
-          expiresAt: null,
-          startedAt: null,
-        }));
+      if (timedMode && activeProblem) {
+        if (response.result === "Pass") {
+          setTimedChallenge(problemId, hydrateTimedChallenge(activeProblem, response, {
+            enabled: false,
+            status: "completed",
+            message: "Timed challenge passed before the clock ran out.",
+          }));
+        } else {
+          setTimedChallenge(problemId, hydrateTimedChallenge(activeProblem, response));
+        }
       }
     } catch (submitError) {
       if (isSelectedProblem) {
         setSubmissionState({ loadingAction: null, result: null, error: submitError.message });
       }
-      if (timedMode) {
-        setTimedChallenge(problemId, (current) => ({
-          ...(current || buildTimedChallenge(selectedProblem || { difficulty: "Easy" })),
-          enabled: false,
-          status: "expired",
-          message: "",
-          expiresAt: null,
-          startedAt: null,
-        }));
+      if (timedMode && activeProblem) {
+        await refreshTimedChallengeState(activeProblem);
       }
     }
-  }
-
-  async function autoSubmitTimedChallenge(problemId) {
-    // Submit whatever code is currently saved when a timer expires.
-    // Submit whatever code is currently saved when a timer expires.
-    await executeCode("Submit", {
-      forcedProblemId: problemId,
-      timedMode: true,
-      autoTriggered: true,
-    });
   }
 
   async function handleUnlockHint(stage) {
@@ -1392,11 +1420,30 @@ export default function App() {
     }
 
     setHintState((current) => ({ loadingStage: stage, hints: current.hints, error: "" }));
+    const activeChallenge = timedChallengeByProblem[selectedProblem.problem_id];
+    const shouldPauseTimer = activeChallenge?.enabled && activeChallenge.status === "running";
+
     try {
+      if (shouldPauseTimer) {
+        const pausedProgress = await pauseTimedMode(selectedProblem.problem_id);
+        setTimedChallenge(selectedProblem.problem_id, hydrateTimedChallenge(selectedProblem, pausedProgress));
+      }
       const response = await getHints(selectedProblem.problem_id, stage);
       setHintState({ loadingStage: null, hints: response, error: "" });
     } catch (hintError) {
       setHintState((current) => ({ loadingStage: null, hints: current.hints, error: hintError.message }));
+    } finally {
+      if (shouldPauseTimer) {
+        try {
+          const resumedProgress = await resumeTimedMode(selectedProblem.problem_id);
+          setTimedChallenge(selectedProblem.problem_id, hydrateTimedChallenge(selectedProblem, resumedProgress));
+        } catch (resumeError) {
+          setTimedChallenge(
+            selectedProblem.problem_id,
+            buildTimedChallenge(selectedProblem, { message: resumeError.message }),
+          );
+        }
+      }
     }
   }
 
@@ -1430,26 +1477,46 @@ export default function App() {
     }
   }
 
-  function handleEnableTimedMode() {
-    // Prepare the timer UI without starting the countdown yet.
-    // Prepare the timer UI without starting the countdown yet.
+  async function handleEnableTimedMode() {
+    // Arm timed mode on the backend, then wait for the first editor change to
+    // actually start the countdown.
     if (!selectedProblem) {
       return;
     }
-    setTimedChallenge(selectedProblem.problem_id, buildTimedChallenge(selectedProblem, {
-      enabled: true,
-      status: "ready",
-      message: "",
-    }));
+    try {
+      const response = await enableTimedMode(selectedProblem.problem_id);
+      setTimedChallenge(selectedProblem.problem_id, hydrateTimedChallenge(selectedProblem, response));
+    } catch (error) {
+      setTimedChallenge(selectedProblem.problem_id, buildTimedChallenge(selectedProblem, { message: error.message }));
+    }
   }
 
-  function handleDisableTimedMode() {
-    // Exit timed mode and restore the problem's idle timer state.
-    // Exit timed mode and restore the problem's idle timer state.
+  async function handleDisableTimedMode() {
+    // Clear any active timer so the learner can go back to untimed practice.
     if (!selectedProblem) {
       return;
     }
-    setTimedChallenge(selectedProblem.problem_id, buildTimedChallenge(selectedProblem));
+    await clearProblemTimer(selectedProblem);
+  }
+
+  async function handleSelectProblem(nextProblemId) {
+    if (selectedProblem && selectedProblem.problem_id !== nextProblemId) {
+      const activeChallenge = timedChallengeByProblem[selectedProblem.problem_id];
+      if (activeChallenge?.enabled) {
+        await clearProblemTimer(selectedProblem);
+      }
+    }
+    setSelectedProblemId(nextProblemId);
+  }
+
+  async function handleDifficultyChange(nextDifficulty) {
+    if (selectedProblem) {
+      const activeChallenge = timedChallengeByProblem[selectedProblem.problem_id];
+      if (activeChallenge?.enabled) {
+        await clearProblemTimer(selectedProblem);
+      }
+    }
+    setSelectedDifficulty(nextDifficulty);
   }
 
   async function handleViewAnswerKey() {
@@ -1657,8 +1724,7 @@ export default function App() {
           <p className="meta-copy">{session.display_name || session.email}</p>
         </div>
         <div className="topbar-actions">
-          <span>{session.role}</span>
-          <span className="auth-provider-pill">{session.auth_provider}</span>
+          <span className="role-pill">{session.role}</span>
           <button type="button" className="secondary-button" onClick={handleLogout}>
             Sign out
           </button>
@@ -1670,17 +1736,16 @@ export default function App() {
           problems={problems}
           selectedDifficulty={selectedDifficulty}
           selectedProblemId={selectedProblemId}
-          onDifficultyChange={setSelectedDifficulty}
-          onSelect={setSelectedProblemId}
+          onDifficultyChange={handleDifficultyChange}
+          onSelect={handleSelectProblem}
         />
         <SubmissionPanel
           problem={selectedProblem}
           code={currentCode}
           onEditorChange={updateCode}
-          onRun={() => executeCode("Run", { timedMode: selectedTimedChallenge?.status === "running" })}
-          onSubmit={() => executeCode("Submit", { timedMode: selectedTimedChallenge?.status === "running" })}
+          onRun={() => executeCode("Run", { timedMode: Boolean(selectedTimedChallenge?.enabled) })}
+          onSubmit={() => executeCode("Submit", { timedMode: Boolean(selectedTimedChallenge?.enabled) })}
           onResetProgress={handleResetProgress}
-          onResetToStarter={() => updateCode(selectedProblem?.starter_code || "")}
           onLoadDemo={() => updateCode(demoSolution)}
           timedChallenge={selectedTimedChallenge}
           onEnableTimedMode={handleEnableTimedMode}
