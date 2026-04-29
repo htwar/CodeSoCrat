@@ -489,6 +489,10 @@ button:disabled {
   color: var(--muted);
 }
 
+.editor-help {
+  margin-top: 10px;
+}
+
 .examples-panel {
   margin-top: 16px;
 }

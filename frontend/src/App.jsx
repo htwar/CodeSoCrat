@@ -456,6 +456,9 @@ function SubmissionPanel({
             height="420px"
           />
         </div>
+        <p className="meta-copy editor-help">
+          Keyboard tip: when focus is inside the code editor, press <code>Ctrl+M</code> to toggle whether the <code>Tab</code> key indents code or moves focus to the next control.
+        </p>
         <div className="editor-actions">
             <button
               type="button"
@@ -778,6 +781,9 @@ function AuthorPanel({
             height="360px"
           />
         </div>
+        <p className="meta-copy editor-help">
+          Keyboard tip: when focus is inside the JSON editor, press <code>Ctrl+M</code> to toggle whether the <code>Tab</code> key indents or moves focus to the next control.
+        </p>
         <div className="editor-actions">
           {authorEditor.mode === "edit" ? (
             <button type="button" onClick={onSave} disabled={authorEditor.loading}>
