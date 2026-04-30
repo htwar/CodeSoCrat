@@ -57,10 +57,6 @@ class BaseHintService(ABC):
         unlocked_stages: set[int],
         latest_submission: Optional[Submission],
     ) -> dict[int, str]:
-        # Once a learner reveals a hint for a problem, keep showing the most
-        # recently generated version of that stage until the problem progress
-        # is reset. Prefer the current submission's hint when it exists, then
-        # fall back to the newest cached hint from earlier attempts.
         if not cached_hints:
             return {}
 
@@ -88,8 +84,7 @@ class BaseHintService(ABC):
         generated_hints: dict[int, str],
         problem: Problem,
     ) -> dict[str, object]:
-        # The frontend expects one payload with all unlocked stages so it can
-        # render the hint panel without extra shape-mapping.
+        
         return {
             "problem_id": problem.problem_id,
             "unlocked_stage": max(unlocked_stages, default=0),
@@ -107,12 +102,9 @@ class BaseHintService(ABC):
         available_hints: dict[int, str],
         context: HintContext,
     ) -> Optional[int]:
-        # Prefer syntax guidance first when the latest failure is a parsing or
-        # definition blocker, even if other hints are already available.
         if context.recommended_stage in unlocked_stages:
             return context.recommended_stage
 
-        # Otherwise prefer the next missing hint.
         missing_stages = [stage for stage in sorted(unlocked_stages) if stage not in available_hints]
         if not missing_stages:
             return min(unlocked_stages) if unlocked_stages else None
@@ -236,8 +228,6 @@ class BaseHintService(ABC):
         )
 
     def _build_submission_excerpt(self, code: str) -> str:
-        # Limit the amount of student code sent to the model so prompts stay
-        # short and focused.
         if not code:
             return "No submission available."
         lines = code.splitlines()
@@ -280,7 +270,6 @@ class BaseHintService(ABC):
         return None
 
     def _condense_text(self, text: str, *, limit: int) -> str:
-        # Collapse long prompt text into a short single-line summary for hints.
         collapsed = " ".join(text.split())
         if len(collapsed) <= limit:
             return collapsed
@@ -433,8 +422,6 @@ def build_hint_service() -> BaseHintService:
 
 
 def cache_generated_hint(*, db, user: User, problem: Problem, submission: Submission, stage: int, content: str, revealed: bool = False) -> GeneratedHint:
-    # Reuse an existing row when the same submission already produced a hint for
-    # that stage, which keeps the cache idempotent.
     cached = (
         db.query(GeneratedHint)
         .filter(

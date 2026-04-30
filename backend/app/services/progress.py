@@ -10,8 +10,6 @@ from app.models import Problem, User, UserProblemProgress
 
 class ProgressService:
     def get_or_create(self, db: Session, *, user: User, problem: Problem) -> UserProblemProgress:
-        # Every user/problem pair keeps a compact snapshot of attempts and
-        # unlocks so the UI can rebuild progress quickly.
         progress = (
             db.query(UserProblemProgress)
             .filter(UserProblemProgress.user_id == user.id, UserProblemProgress.problem_id == problem.id)
@@ -34,13 +32,10 @@ class ProgressService:
         code: Optional[str] = None,
         needed_stage: Optional[int] = None,
     ) -> UserProblemProgress:
-        # "Run" is practice mode; only full submits change durable progress.
         if execution_type != "Submit":
             return progress
 
         if result == "Pass":
-            # Passing submissions stop further hint escalation and mark the
-            # problem complete.
             progress.completed = True
             progress.last_failure_category = None
             progress.unlocked_stage = max(self.get_unlocked_stages(progress), default=0)
@@ -84,9 +79,6 @@ class ProgressService:
         return 1
 
     def get_unlocked_stages(self, progress: UserProblemProgress) -> set[int]:
-        # The current submission only unlocks the one hint type that best
-        # matches the learner's active blocker. Previously revealed hints are
-        # surfaced separately by the hint cache, not by widening this set.
         if progress.completed:
             return set()
 
