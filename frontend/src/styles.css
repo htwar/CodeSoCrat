@@ -438,6 +438,14 @@ button:disabled {
   align-items: start;
 }
 
+.problem-list {
+  position: sticky;
+  top: 20px;
+  align-self: start;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
 .hints-panel {
   position: sticky;
   top: 20px;
