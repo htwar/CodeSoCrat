@@ -145,6 +145,7 @@ class HintResponse(StrictModel):
     problem_id: str
     unlocked_stage: int
     unlocked_stages: list[int]
+    revealed_stages: list[int] = Field(default_factory=list)
     highlight_stage: Optional[int] = None
     conceptual: Optional[str]
     strategic: Optional[str]

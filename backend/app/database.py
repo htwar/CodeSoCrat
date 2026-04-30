@@ -72,6 +72,11 @@ def ensure_schema_evolution() -> None:
         if "timed_mode_paused_at" not in progress_columns:
             statements.append("ALTER TABLE user_problem_progress ADD COLUMN timed_mode_paused_at DATETIME")
 
+    if "generated_hints" in table_names:
+        generated_hint_columns = {column["name"] for column in inspector.get_columns("generated_hints")}
+        if "revealed" not in generated_hint_columns:
+            statements.append("ALTER TABLE generated_hints ADD COLUMN revealed BOOLEAN DEFAULT 0")
+
     if not statements:
         return
 
@@ -86,3 +91,5 @@ def ensure_schema_evolution() -> None:
             connection.execute(text("UPDATE users SET auth_provider = COALESCE(auth_provider, 'local')"))
         if "user_problem_progress" in table_names:
             connection.execute(text("UPDATE user_problem_progress SET timed_mode_enabled = COALESCE(timed_mode_enabled, 0)"))
+        if "generated_hints" in table_names:
+            connection.execute(text("UPDATE generated_hints SET revealed = COALESCE(revealed, 0)"))

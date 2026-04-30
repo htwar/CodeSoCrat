@@ -477,12 +477,25 @@ def _execute_code(
         function_name=problem.function_name,
         test_cases=test_cases,
     )
+    classification_context = HintContext(
+        problem=problem,
+        progress=progress,
+        latest_submission=None,
+        submission_code=payload.code,
+        failure_category=evaluation.failure_category,
+        execution_feedback=evaluation.feedback,
+        error_line=evaluation.error_line,
+        error_excerpt=evaluation.error_excerpt,
+    )
+    recommended_stage = hint_service.classify_failure_stage(context=classification_context)
     progress_service.apply_submission_outcome(
         progress=progress,
         execution_type=execution_type,
         result=evaluation.result,
         failure_category=evaluation.failure_category,
         valid_attempt=evaluation.valid_attempt,
+        code=payload.code,
+        needed_stage=recommended_stage,
     )
 
     submission = Submission(
@@ -723,10 +736,16 @@ def get_hints(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Problem not found.")
 
     progress = progress_service.get_or_create(db, user=user, problem=problem)
-    unlocked_stages = progress_service.get_unlocked_stages(progress)
-    if not unlocked_stages:
+    if progress.completed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No hints unlocked yet.")
-    if stage is not None and stage not in unlocked_stages:
+    eligible_stages = progress_service.get_unlocked_stages(progress)
+    cached_hints = db.query(GeneratedHint).filter(GeneratedHint.user_id == user.id, GeneratedHint.problem_id == problem.id).all()
+    revealed_stages: set[int] = {hint.stage for hint in cached_hints if hint.revealed}
+    visible_stages = eligible_stages | revealed_stages
+
+    if not visible_stages:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No hints unlocked yet.")
+    if stage is not None and stage not in visible_stages:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="That hint stage is not unlocked yet.")
 
     latest_submission = (
@@ -740,11 +759,35 @@ def get_hints(
         .first()
     )
 
-    context = HintContext(problem=problem, progress=progress, latest_submission=latest_submission)
-    cached_hints = db.query(GeneratedHint).filter(GeneratedHint.user_id == user.id, GeneratedHint.problem_id == problem.id).all()
+    context = HintContext(
+        problem=problem,
+        progress=progress,
+        latest_submission=latest_submission,
+        recommended_stage=(
+            hint_service.classify_failure_stage(
+                context=HintContext(
+                    problem=problem,
+                    progress=progress,
+                    latest_submission=latest_submission,
+                    submission_code=latest_submission.code if latest_submission is not None else "",
+                    failure_category=latest_submission.failure_category if latest_submission is not None else progress.last_failure_category,
+                    execution_feedback=latest_submission.feedback if latest_submission is not None else "",
+                    error_line=latest_submission.error_line if latest_submission is not None else None,
+                    error_excerpt=latest_submission.error_excerpt if latest_submission is not None else None,
+                )
+            )
+            if latest_submission is not None or progress.last_failure_category is not None
+            else None
+        ),
+        submission_code=latest_submission.code if latest_submission is not None else "",
+        failure_category=latest_submission.failure_category if latest_submission is not None else progress.last_failure_category,
+        execution_feedback=latest_submission.feedback if latest_submission is not None else "",
+        error_line=latest_submission.error_line if latest_submission is not None else None,
+        error_excerpt=latest_submission.error_excerpt if latest_submission is not None else None,
+    )
     generated_hints = hint_service.get_cached_hints(
         cached_hints=cached_hints,
-        unlocked_stages=unlocked_stages,
+        unlocked_stages=visible_stages,
         latest_submission=latest_submission,
     )
     latest_submission_stage_hints = {
@@ -753,32 +796,14 @@ def get_hints(
         if latest_submission is not None and hint.submission_id == latest_submission.id
     }
 
+    current_stage = progress.unlocked_stage if progress.unlocked_stage in eligible_stages else None
+    if latest_submission is not None and current_stage is not None and current_stage not in latest_submission_stage_hints:
+        # A new failure for an already known hint type should require the
+        # learner to click Unlock Hint again for the refreshed hint.
+        generated_hints.pop(current_stage, None)
+
     try:
-        refresh_stage = hint_service.determine_highlight_stage(
-            unlocked_stages=unlocked_stages,
-            available_hints=generated_hints,
-            context=context,
-        )
-        should_refresh_revealed_hint = (
-            latest_submission is not None
-            and refresh_stage is not None
-            and refresh_stage in generated_hints
-            and refresh_stage not in latest_submission_stage_hints
-        )
-
-        if should_refresh_revealed_hint and refresh_stage is not None:
-            generated_hints[refresh_stage] = hint_service.generate_hint(stage=refresh_stage, context=context)
-            cache_generated_hint(
-                db=db,
-                user=user,
-                problem=problem,
-                submission=latest_submission,
-                stage=refresh_stage,
-                content=generated_hints[refresh_stage],
-            )
-            latest_submission_stage_hints.add(refresh_stage)
-
-        if stage is not None and latest_submission is not None and stage not in latest_submission_stage_hints:
+        if stage is not None and latest_submission is not None and stage in eligible_stages and stage not in latest_submission_stage_hints:
             generated_hints[stage] = hint_service.generate_hint(stage=stage, context=context)
             cache_generated_hint(
                 db=db,
@@ -787,21 +812,22 @@ def get_hints(
                 submission=latest_submission,
                 stage=stage,
                 content=generated_hints[stage],
+                revealed=True,
             )
+            revealed_stages.add(stage)
             latest_submission_stage_hints.add(stage)
-            db.commit()
-        elif should_refresh_revealed_hint:
             db.commit()
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     payload = hint_service.build_hint_response(
-        unlocked_stages=unlocked_stages,
+        unlocked_stages=eligible_stages,
+        revealed_stages={stage_id for stage_id in revealed_stages if stage_id in generated_hints},
         generated_hints=generated_hints,
         problem=problem,
     )
     payload["highlight_stage"] = hint_service.determine_highlight_stage(
-        unlocked_stages=unlocked_stages,
+        unlocked_stages=eligible_stages,
         available_hints=generated_hints,
         context=context,
     )

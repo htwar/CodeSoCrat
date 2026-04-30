@@ -78,7 +78,7 @@ class UnitServiceTests(unittest.TestCase):
             completed=False,
         )
 
-        for _ in range(4):
+        for _ in range(3):
             service.apply_submission_outcome(
                 progress=progress,
                 execution_type="Submit",
@@ -87,9 +87,10 @@ class UnitServiceTests(unittest.TestCase):
                 valid_attempt=True,
             )
 
-        self.assertEqual(progress.valid_failed_attempts, 4)
+        self.assertEqual(progress.valid_failed_attempts, 3)
         self.assertTrue(progress.answer_key_unlocked)
-        self.assertEqual(progress.unlocked_stage, 3)
+        self.assertEqual(progress.unlocked_stage, 1)
+        self.assertEqual(service.get_unlocked_stages(progress), {1})
 
     def test_get_unlocked_stages_fast_tracks_syntax_failures(self) -> None:
         # Syntax mistakes skip directly to the syntactic hint even before the
@@ -103,13 +104,57 @@ class UnitServiceTests(unittest.TestCase):
             problem_id=1,
             valid_failed_attempts=0,
             answer_key_unlocked=False,
-            unlocked_stage=0,
+            unlocked_stage=3,
             completed=False,
             last_failure_category="SyntaxError",
         )
 
         unlocked = service.get_unlocked_stages(progress)
         self.assertEqual(unlocked, {3})
+
+    def test_infer_needed_stage_defaults_incorrect_output_to_conceptual(self) -> None:
+        from app.services.progress import ProgressService
+
+        service = ProgressService()
+        stage = service.infer_needed_stage(
+            failure_category="IncorrectOutput",
+            code="def is_even(n):\n    return n % 2 == 3\n",
+        )
+        self.assertEqual(stage, 1)
+
+    def test_infer_needed_stage_marks_simple_wrong_return_as_conceptual(self) -> None:
+        from app.services.progress import ProgressService
+
+        service = ProgressService()
+        stage = service.infer_needed_stage(
+            failure_category="IncorrectOutput",
+            code="def is_even(n):\n    return n + 2\n",
+        )
+        self.assertEqual(stage, 1)
+
+    def test_hint_sanitizer_rewrites_meta_fallback_into_plain_hint(self) -> None:
+        from app.models import Problem, UserProblemProgress
+        from app.services.hints import BaseHintService, HintContext
+
+        class StubHintService(BaseHintService):
+            def generate_hint(self, *, stage: int, context: HintContext) -> str:
+                return ""
+
+        service = StubHintService()
+        context = HintContext(
+            problem=Problem(title="Is Even Number", prompt="Write is_even.", function_name="is_even"),
+            progress=UserProblemProgress(),
+            latest_submission=None,
+        )
+
+        hint = service._sanitize_generated_hint(
+            stage=2,
+            hint="Use return n % 2 == 0.",
+            context=context,
+        )
+
+        self.assertNotIn("This strategic hint should", hint)
+        self.assertIn("wrong relationship", hint)
 
     def test_completed_problem_hides_previously_unlocked_hints(self) -> None:
         # Passing a problem should return the hint panel to its normal locked

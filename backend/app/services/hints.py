@@ -23,6 +23,12 @@ class HintContext:
     problem: Problem
     progress: UserProblemProgress
     latest_submission: Optional[Submission]
+    recommended_stage: Optional[int] = None
+    submission_code: str = ""
+    failure_category: Optional[str] = None
+    execution_feedback: str = ""
+    error_line: Optional[int] = None
+    error_excerpt: Optional[str] = None
 
 
 class BaseHintService(ABC):
@@ -31,6 +37,18 @@ class BaseHintService(ABC):
     @abstractmethod
     def generate_hint(self, *, stage: int, context: HintContext) -> str:
         raise NotImplementedError
+
+    def classify_failure_stage(self, *, context: HintContext) -> int:
+        failure_category = context.failure_category or (
+            context.latest_submission.failure_category if context.latest_submission is not None else context.progress.last_failure_category
+        )
+        if failure_category in {"SyntaxError", "DefinitionError"}:
+            return 3
+        if failure_category in {"RuntimeError", "TimeLimitExceeded"}:
+            return 2
+        if failure_category == "IncorrectOutput":
+            return 1
+        return self._fallback_logic_stage(code=self._submission_code(context))
 
     def get_cached_hints(
         self,
@@ -62,16 +80,24 @@ class BaseHintService(ABC):
             generated_hints[hint.stage] = hint.content
         return generated_hints
 
-    def build_hint_response(self, *, unlocked_stages: set[int], generated_hints: dict[int, str], problem: Problem) -> dict[str, object]:
+    def build_hint_response(
+        self,
+        *,
+        unlocked_stages: set[int],
+        revealed_stages: set[int],
+        generated_hints: dict[int, str],
+        problem: Problem,
+    ) -> dict[str, object]:
         # The frontend expects one payload with all unlocked stages so it can
         # render the hint panel without extra shape-mapping.
         return {
             "problem_id": problem.problem_id,
             "unlocked_stage": max(unlocked_stages, default=0),
             "unlocked_stages": sorted(unlocked_stages),
-            "conceptual": generated_hints.get(1) if 1 in unlocked_stages else None,
-            "strategic": generated_hints.get(2) if 2 in unlocked_stages else None,
-            "syntactic": generated_hints.get(3) if 3 in unlocked_stages else None,
+            "revealed_stages": sorted(revealed_stages),
+            "conceptual": generated_hints.get(1) if 1 in revealed_stages else None,
+            "strategic": generated_hints.get(2) if 2 in revealed_stages else None,
+            "syntactic": generated_hints.get(3) if 3 in revealed_stages else None,
         }
 
     def determine_highlight_stage(
@@ -83,9 +109,8 @@ class BaseHintService(ABC):
     ) -> Optional[int]:
         # Prefer syntax guidance first when the latest failure is a parsing or
         # definition blocker, even if other hints are already available.
-        failure_category = context.latest_submission.failure_category if context.latest_submission is not None else context.progress.last_failure_category
-        if failure_category in {"SyntaxError", "DefinitionError"} and 3 in unlocked_stages:
-            return 3
+        if context.recommended_stage in unlocked_stages:
+            return context.recommended_stage
 
         # Otherwise prefer the next missing hint.
         missing_stages = [stage for stage in sorted(unlocked_stages) if stage not in available_hints]
@@ -97,47 +122,64 @@ class BaseHintService(ABC):
         return None
 
     def _sanitize_generated_hint(self, *, stage: int, hint: str, context: HintContext) -> str:
-        # Guard against over-revealing hints for beginner problems by stripping
-        # exact solution patterns from conceptual and strategic hints.
         cleaned = " ".join(hint.split())
         if stage not in {1, 2}:
             return cleaned
 
-        lower_hint = cleaned.lower()
-        forbidden_markers = [
+        if self._contains_solution_like_content(cleaned):
+            stricter_prompt = "\n".join(
+                [
+                    "You are helping a student with a Python problem. Give one short hint.",
+                    "Do NOT mention any specific operator, constant, variable name, return expression, or corrected code.",
+                    "Do NOT say exactly what expression to write, what exact condition to test, or what exact rule to use.",
+                    "Do NOT say what to return or what exact value to compare against.",
+                    "Only describe the concept or strategy the student is missing in plain English.",
+                    f"Problem: {context.problem.title}",
+                    f"Task: {self._condense_text(context.problem.prompt, limit=280)}",
+                    f"Hint type: {'Conceptual' if stage == 1 else 'Strategic'}",
+                    "Student code:",
+                    self._build_submission_excerpt(self._submission_code(context)),
+                ]
+            )
+            try:
+                return self.generate_hint_from_prompt(prompt=stricter_prompt, stage=stage, context=context)
+            except Exception:
+                pass
+
+        cleaned = re.sub(r"`[^`]+`", "that expression", cleaned)
+        return cleaned
+
+    def _contains_solution_like_content(self, hint: str) -> bool:
+        lower_hint = hint.lower()
+        forbidden_phrases = [
             "return ",
             "`return",
             "use: return",
             "replace it with",
-            "modulo 2",
-            "% 2",
-            "== 0",
-            "divided by 2",
-            "remainder of",
+            "change it to",
+            "change the line to",
+            "rewrite the line as",
+            "the exact code is",
+            "your code should be",
         ]
-        if any(marker in lower_hint for marker in forbidden_markers):
-            hint_name = STAGE_LABELS[stage].lower()
-            if stage == 1:
-                return (
-                    f"This {hint_name} hint should stay high level. Focus on what property separates valid cases from invalid ones, "
-                    "and make sure the function returns a boolean answer instead of restating the full rule."
-                )
-            return (
-                f"This {hint_name} hint should guide the next step without giving the final condition away. "
-                "Re-check what relationship the function needs to test, then rewrite the return statement so it evaluates that property directly."
-            )
+        if any(phrase in lower_hint for phrase in forbidden_phrases):
+            return True
 
-        # Strip stray inline code fragments even when the rest of the hint is usable.
-        cleaned = re.sub(r"`[^`]+`", "that expression", cleaned)
-        return cleaned
+        forbidden_patterns = [
+            r"`[^`]+`",
+            r"\breturn\s+[A-Za-z0-9_\(].+",
+            r"\b(use|try|write)\s+.+[=+\-*/%<>!]{1,2}.+",
+            r"\b(compare|check|set)\s+.+\bto\b\s+[-]?\d+",
+        ]
+        return any(re.search(pattern, hint, flags=re.IGNORECASE) for pattern in forbidden_patterns)
 
     def _build_prompt(self, *, stage: int, context: HintContext) -> str:
         submission = context.latest_submission
-        submission_code = self._build_submission_excerpt(submission.code if submission is not None else "")
-        failure_category = submission.failure_category if submission is not None else context.progress.last_failure_category
-        execution_feedback = submission.feedback if submission is not None else "No execution feedback available."
-        error_line = submission.error_line if submission is not None else None
-        error_excerpt = submission.error_excerpt if submission is not None else None
+        submission_code = self._build_submission_excerpt(self._submission_code(context))
+        failure_category = context.failure_category or (submission.failure_category if submission is not None else context.progress.last_failure_category)
+        execution_feedback = context.execution_feedback or (submission.feedback if submission is not None else "No execution feedback available.")
+        error_line = context.error_line if context.error_line is not None else (submission.error_line if submission is not None else None)
+        error_excerpt = context.error_excerpt if context.error_excerpt is not None else (submission.error_excerpt if submission is not None else None)
 
         stage_instructions = {
             1: (
@@ -206,6 +248,37 @@ class BaseHintService(ABC):
         tail = lines[-2:]
         return "\n".join([*head, "...", *tail])
 
+    def _submission_code(self, context: HintContext) -> str:
+        if context.submission_code:
+            return context.submission_code
+        if context.latest_submission is not None:
+            return context.latest_submission.code
+        return ""
+
+    def _fallback_logic_stage(self, *, code: str) -> int:
+        if not code:
+            return 1
+        try:
+            import ast
+
+            tree = ast.parse(code)
+        except SyntaxError:
+            return 1
+
+        strategic_nodes = (ast.Compare, ast.BoolOp, ast.If, ast.IfExp)
+        uses_strategy_structure = any(isinstance(node, strategic_nodes) for node in ast.walk(tree))
+        if uses_strategy_structure:
+            return 2
+        return 1
+
+    def _parse_stage_label(self, raw: str) -> Optional[int]:
+        normalized = raw.strip().upper()
+        if "STRATEGIC" in normalized or normalized == "2":
+            return 2
+        if "CONCEPTUAL" in normalized or normalized == "1":
+            return 1
+        return None
+
     def _condense_text(self, text: str, *, limit: int) -> str:
         # Collapse long prompt text into a short single-line summary for hints.
         collapsed = " ".join(text.split())
@@ -213,9 +286,97 @@ class BaseHintService(ABC):
             return collapsed
         return f"{collapsed[: limit - 3].rstrip()}..."
 
-
 class OllamaHintService(BaseHintService):
     provider_name = "ollama"
+
+    def classify_failure_stage(self, *, context: HintContext) -> int:
+        base_stage = super().classify_failure_stage(context=context)
+        failure_category = context.failure_category or (
+            context.latest_submission.failure_category if context.latest_submission is not None else context.progress.last_failure_category
+        )
+        if failure_category != "IncorrectOutput":
+            return base_stage
+
+        prompt = "\n".join(
+            [
+                "You are a Python tutor classifying a student's mistake.",
+                "Reply with exactly one word: CONCEPTUAL or STRATEGIC.",
+                "",
+                "Definitions:",
+                "CONCEPTUAL means the student's code is based on the wrong core idea, wrong main operation, wrong property, wrong formula, or wrong interpretation of the task.",
+                "STRATEGIC means the student's code is based on the right core idea, but one or more implementation details are wrong.",
+                "",
+                "Decision process:",
+                "1. Identify the core requirement of the task from the problem statement.",
+                "2. Identify the main idea used in the student's code.",
+                "3. If the student's main idea is different from the task's core requirement, choose CONCEPTUAL.",
+                "4. If the student's main idea matches the task's core requirement but the implementation is wrong, choose STRATEGIC.",
+                "",
+                "Choose CONCEPTUAL when:",
+                "- the code solves a different problem than the task asks",
+                "- the code uses the wrong main operation",
+                "- the code checks the wrong main property",
+                "- the code applies the wrong formula or rule",
+                "- the code uses an unrelated condition",
+                "- the approach would need to be replaced, not just adjusted",
+                "",
+                "Choose STRATEGIC when:",
+                "- the code uses the right main operation but applies it incorrectly",
+                "- the code checks the right main property but compares it to the wrong value",
+                "- the code uses the right variables but combines them incorrectly",
+                "- the code has flipped return values",
+                "- the code prints instead of returns",
+                "- the code has incomplete branching or misses a case",
+                "- the code has an off-by-one error or wrong boundary",
+                "- the code has steps in the wrong order",
+                "- the approach is recognizable as correct but needs refinement",
+                "",
+                "Important distinctions:",
+                "- A wrong operator is CONCEPTUAL if that operator is the central operation required by the task.",
+                "- A wrong operator is STRATEGIC if the overall approach is still correct and the operator is only a local implementation detail.",
+                "- A wrong constant or comparison value is STRATEGIC if the code is checking the correct general property.",
+                "- A wrong constant or comparison value is CONCEPTUAL if it changes the code to check a different core property.",
+                "- If the code is close enough that a small correction would preserve the same approach, choose STRATEGIC.",
+                "- If the code needs a different approach or different core idea, choose CONCEPTUAL.",
+                "",
+                "Do not explain your answer.",
+                "",
+                f"Problem title: {context.problem.title}",
+                f"Problem statement: {self._condense_text(context.problem.prompt, limit=420)}",
+                f"Required function name: {context.problem.function_name}",
+                f"Failure category: {failure_category}",
+                f"Execution feedback: {context.execution_feedback or 'No execution feedback available.'}",
+                "Student code:",
+                self._build_submission_excerpt(self._submission_code(context)),
+            ]
+        )
+        payload = json.dumps(
+            {
+                "model": settings.hint_model or settings.ollama_model,
+                "prompt": prompt,
+                "stream": False,
+                "keep_alive": settings.ollama_keep_alive,
+                "options": {
+                    "num_predict": 8,
+                    "temperature": 0,
+                },
+            }
+        ).encode("utf-8")
+        endpoint = f"{settings.ollama_base_url}/api/generate"
+        http_request = request.Request(
+            endpoint,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with request.urlopen(http_request, timeout=settings.ollama_timeout_seconds) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            stage = self._parse_stage_label(body.get("response") or "")
+            return stage or base_stage
+        except Exception:
+            return base_stage
 
     def generate_hint(self, *, stage: int, context: HintContext) -> str:
         prompt = self._build_prompt(stage=stage, context=context)
@@ -255,63 +416,23 @@ class OllamaHintService(BaseHintService):
         return self._sanitize_generated_hint(stage=stage, hint=hint, context=context)
 
 
-class GPT4AllHintService(BaseHintService):
-    provider_name = "gpt4all"
-
-    def generate_hint(self, *, stage: int, context: HintContext) -> str:
-        model_name = settings.gpt4all_model_path or settings.hint_model
-        if not model_name:
-            raise RuntimeError("Set CODESOCRAT_GPT4ALL_MODEL_PATH or CODESOCRAT_HINT_MODEL before using the GPT4All hint provider.")
-
-        try:
-            from gpt4all import GPT4All
-        except ImportError as exc:
-            raise RuntimeError("GPT4All support requires the `gpt4all` package to be installed in the backend environment.") from exc
-
-        prompt = self._build_prompt(stage=stage, context=context)
-
-        try:
-            model = GPT4All(
-                model_name=model_name,
-                device=settings.gpt4all_device,
-                allow_download=settings.gpt4all_allow_download,
-            )
-        except TypeError:
-            # Older GPT4All builds do not expose `allow_download`.
-            model = GPT4All(
-                model_name=model_name,
-                device=settings.gpt4all_device,
-            )
-        except Exception as exc:
-            raise RuntimeError(f"GPT4All could not load the model `{model_name}`.") from exc
-
-        try:
-            with model.chat_session():
-                hint = model.generate(
-                    prompt,
-                    max_tokens=settings.ollama_hint_max_tokens,
-                    temp=0.2,
-                    n_threads=settings.gpt4all_threads,
-                )
-        except Exception as exc:
-            raise RuntimeError("GPT4All hint generation failed.") from exc
-
-        hint_text = str(hint).strip()
-        if not hint_text:
-            raise RuntimeError("GPT4All returned an empty hint.")
-        return self._sanitize_generated_hint(stage=stage, hint=hint_text, context=context)
-
-
 def build_hint_service() -> BaseHintService:
+    provider_factories = {
+        "ollama": OllamaHintService,
+    }
     provider = settings.hint_provider.lower()
-    if provider == "ollama":
-        return OllamaHintService()
-    if provider == "gpt4all":
-        return GPT4AllHintService()
-    raise RuntimeError(f"Unsupported hint provider `{settings.hint_provider}`.")
+    factory = provider_factories.get(provider)
+    if factory is None:
+        supported = ", ".join(sorted(provider_factories))
+        raise RuntimeError(
+            f"Unsupported hint provider `{settings.hint_provider}`. "
+            f"Implement a BaseHintService subclass and register it in build_hint_service(). "
+            f"Current built-in providers: {supported}."
+        )
+    return factory()
 
 
-def cache_generated_hint(*, db, user: User, problem: Problem, submission: Submission, stage: int, content: str) -> GeneratedHint:
+def cache_generated_hint(*, db, user: User, problem: Problem, submission: Submission, stage: int, content: str, revealed: bool = False) -> GeneratedHint:
     # Reuse an existing row when the same submission already produced a hint for
     # that stage, which keeps the cache idempotent.
     cached = (
@@ -325,6 +446,8 @@ def cache_generated_hint(*, db, user: User, problem: Problem, submission: Submis
         .first()
     )
     if cached is not None:
+        if revealed and not cached.revealed:
+            cached.revealed = True
         return cached
 
     cached = GeneratedHint(
@@ -333,6 +456,7 @@ def cache_generated_hint(*, db, user: User, problem: Problem, submission: Submis
         submission_id=submission.id,
         stage=stage,
         content=content,
+        revealed=revealed,
     )
     db.add(cached)
     db.flush()

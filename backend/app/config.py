@@ -73,10 +73,6 @@ class Settings(BaseModel):
     ollama_keep_alive: str = os.getenv("CODESOCRAT_OLLAMA_KEEP_ALIVE", "10m")
     ollama_hint_max_tokens: int = int(os.getenv("CODESOCRAT_OLLAMA_HINT_MAX_TOKENS", "80"))
     ollama_hint_code_preview_lines: int = int(os.getenv("CODESOCRAT_OLLAMA_HINT_CODE_PREVIEW_LINES", "24"))
-    gpt4all_model_path: str = os.getenv("CODESOCRAT_GPT4ALL_MODEL_PATH", "")
-    gpt4all_device: str = os.getenv("CODESOCRAT_GPT4ALL_DEVICE", "cpu")
-    gpt4all_threads: int = int(os.getenv("CODESOCRAT_GPT4ALL_THREADS", "4"))
-    gpt4all_allow_download: bool = os.getenv("CODESOCRAT_GPT4ALL_ALLOW_DOWNLOAD", "false").lower() == "true"
     rate_limit_window_seconds: int = int(os.getenv("CODESOCRAT_RATE_LIMIT_WINDOW_SECONDS", "60"))
     rate_limit_ip_public: int = int(os.getenv("CODESOCRAT_RATE_LIMIT_IP_PUBLIC", "60"))
     rate_limit_ip_authenticated: int = int(os.getenv("CODESOCRAT_RATE_LIMIT_IP_AUTHENTICATED", "120"))

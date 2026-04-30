@@ -153,4 +153,5 @@ class GeneratedHint(Base):
     submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id"), index=True)
     stage: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
+    revealed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
