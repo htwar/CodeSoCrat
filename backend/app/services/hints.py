@@ -81,15 +81,16 @@ class BaseHintService(ABC):
         available_hints: dict[int, str],
         context: HintContext,
     ) -> Optional[int]:
-        # Prefer the next missing hint, but jump to syntax guidance first when
-        # the failure category shows the student is blocked by parsing issues.
+        # Prefer syntax guidance first when the latest failure is a parsing or
+        # definition blocker, even if other hints are already available.
+        failure_category = context.latest_submission.failure_category if context.latest_submission is not None else context.progress.last_failure_category
+        if failure_category in {"SyntaxError", "DefinitionError"} and 3 in unlocked_stages:
+            return 3
+
+        # Otherwise prefer the next missing hint.
         missing_stages = [stage for stage in sorted(unlocked_stages) if stage not in available_hints]
         if not missing_stages:
             return min(unlocked_stages) if unlocked_stages else None
-
-        failure_category = context.latest_submission.failure_category if context.latest_submission is not None else context.progress.last_failure_category
-        if failure_category in {"SyntaxError", "DefinitionError"} and 3 in missing_stages:
-            return 3
 
         for stage in missing_stages:
             return stage

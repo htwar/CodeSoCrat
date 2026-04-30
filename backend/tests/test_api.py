@@ -424,6 +424,71 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(hints.status_code, 200)
         self.assertEqual(hints.json()["highlight_stage"], 3)
 
+    def test_new_syntax_failure_refreshes_syntactic_hint_for_latest_submission(self) -> None:
+        # A later syntax error should replace the old syntactic hint content
+        # with feedback generated from the latest official submit, but only
+        # after the learner has already revealed that hint type before.
+        from app.models import GeneratedHint, Problem, Submission, User
+
+        self._login("student@codesocrat.dev", "studentpass")
+
+        first_response = self._submit("sum_two_numbers", "def add_numbers(a, b)\n    return a + b\n")
+        self.assertEqual(first_response.status_code, 200)
+
+        first_hint = self.client.get("/hints", params={"problem_id": "sum_two_numbers", "stage": 3})
+        self.assertEqual(first_hint.status_code, 200)
+        self.assertEqual(first_hint.json()["syntactic"], "generated-stage-3")
+
+        second_response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a + \n")
+        self.assertEqual(second_response.status_code, 200)
+
+        refreshed_hints = self.client.get("/hints", params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(refreshed_hints.status_code, 200)
+        self.assertEqual(refreshed_hints.json()["highlight_stage"], 3)
+        self.assertEqual(refreshed_hints.json()["syntactic"], "generated-stage-3")
+
+        db = self.SessionLocal()
+        try:
+            user = db.query(User).filter(User.email == "student@codesocrat.dev").first()
+            problem = db.query(Problem).filter(Problem.problem_id == "sum_two_numbers").first()
+            latest_submissions = (
+                db.query(Submission)
+                .filter(Submission.user_id == user.id, Submission.problem_id == problem.id)
+                .order_by(Submission.created_at.desc(), Submission.id.desc())
+                .limit(2)
+                .all()
+            )
+            latest_submission_ids = {submission.id for submission in latest_submissions}
+            cached_stage_three_hints = (
+                db.query(GeneratedHint)
+                .filter(
+                    GeneratedHint.user_id == user.id,
+                    GeneratedHint.problem_id == problem.id,
+                    GeneratedHint.stage == 3,
+                    GeneratedHint.submission_id.in_(latest_submission_ids),
+                )
+                .all()
+            )
+            self.assertEqual(len(cached_stage_three_hints), 2)
+        finally:
+            db.close()
+
+    def test_new_syntax_failure_does_not_auto_reveal_unopened_syntactic_hint(self) -> None:
+        # A syntax hint that has only been earned, not revealed, should remain
+        # behind the unlock action on later syntax failures too.
+        self._login("student@codesocrat.dev", "studentpass")
+
+        first_response = self._submit("sum_two_numbers", "def add_numbers(a, b)\n    return a + b\n")
+        self.assertEqual(first_response.status_code, 200)
+
+        second_response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a + \n")
+        self.assertEqual(second_response.status_code, 200)
+
+        hints = self.client.get("/hints", params={"problem_id": "sum_two_numbers"})
+        self.assertEqual(hints.status_code, 200)
+        self.assertEqual(hints.json()["highlight_stage"], 3)
+        self.assertIsNone(hints.json()["syntactic"])
+
     def test_evaluation_captures_syntax_error_context(self) -> None:
         # This doubles as a route-independent check that evaluation exposes the
         # metadata the hinting/UI layers rely on.

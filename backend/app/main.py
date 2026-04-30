@@ -747,9 +747,38 @@ def get_hints(
         unlocked_stages=unlocked_stages,
         latest_submission=latest_submission,
     )
+    latest_submission_stage_hints = {
+        hint.stage
+        for hint in cached_hints
+        if latest_submission is not None and hint.submission_id == latest_submission.id
+    }
 
     try:
-        if stage is not None and latest_submission is not None and stage not in generated_hints:
+        refresh_stage = hint_service.determine_highlight_stage(
+            unlocked_stages=unlocked_stages,
+            available_hints=generated_hints,
+            context=context,
+        )
+        should_refresh_revealed_hint = (
+            latest_submission is not None
+            and refresh_stage is not None
+            and refresh_stage in generated_hints
+            and refresh_stage not in latest_submission_stage_hints
+        )
+
+        if should_refresh_revealed_hint and refresh_stage is not None:
+            generated_hints[refresh_stage] = hint_service.generate_hint(stage=refresh_stage, context=context)
+            cache_generated_hint(
+                db=db,
+                user=user,
+                problem=problem,
+                submission=latest_submission,
+                stage=refresh_stage,
+                content=generated_hints[refresh_stage],
+            )
+            latest_submission_stage_hints.add(refresh_stage)
+
+        if stage is not None and latest_submission is not None and stage not in latest_submission_stage_hints:
             generated_hints[stage] = hint_service.generate_hint(stage=stage, context=context)
             cache_generated_hint(
                 db=db,
@@ -759,6 +788,9 @@ def get_hints(
                 stage=stage,
                 content=generated_hints[stage],
             )
+            latest_submission_stage_hints.add(stage)
+            db.commit()
+        elif should_refresh_revealed_hint:
             db.commit()
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
