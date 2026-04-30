@@ -87,6 +87,42 @@ class BackendFlowTests(unittest.TestCase):
                         feedback="Test case 2 failed: expected True, got False.",
                         valid_attempt=True,
                     )
+                if "return n + 2" in code:
+                    return EvaluationResult(
+                        result="Fail",
+                        failure_category="IncorrectOutput",
+                        runtime_ms=9,
+                        memory_mb=32,
+                        feedback="Test case 1 failed: expected True, got 4.",
+                        valid_attempt=True,
+                    )
+                if "return n % 2 == 3" in code:
+                    return EvaluationResult(
+                        result="Fail",
+                        failure_category="IncorrectOutput",
+                        runtime_ms=9,
+                        memory_mb=32,
+                        feedback="Test case 1 failed: expected True, got False.",
+                        valid_attempt=True,
+                    )
+                if "return n % 2 == -1" in code:
+                    return EvaluationResult(
+                        result="Fail",
+                        failure_category="IncorrectOutput",
+                        runtime_ms=9,
+                        memory_mb=32,
+                        feedback="Test case 1 failed: expected True, got False.",
+                        valid_attempt=True,
+                    )
+                if "return n % 3 == 0" in code:
+                    return EvaluationResult(
+                        result="Fail",
+                        failure_category="IncorrectOutput",
+                        runtime_ms=9,
+                        memory_mb=32,
+                        feedback="Test case 2 failed: expected False, got True.",
+                        valid_attempt=True,
+                    )
                 return EvaluationResult(
                     result="Pass",
                     failure_category=None,
@@ -101,8 +137,31 @@ class BackendFlowTests(unittest.TestCase):
             def generate_hint(self, *, stage, context):
                 return f"generated-stage-{stage}"
 
+            def classify_failure_stage(self, *, context):
+                failure_category = context.failure_category
+                code = context.submission_code or ""
+                if failure_category in {"SyntaxError", "DefinitionError"}:
+                    return 3
+                if failure_category in {"RuntimeError", "TimeLimitExceeded"}:
+                    return 2
+                if failure_category != "IncorrectOutput":
+                    return 1
+                if "return n % 2 == 3" in code:
+                    return 2
+                if "return n % 2 == -1" in code:
+                    return 2
+                if "return n % 3 == 0" in code:
+                    return 1
+                if "return n + 2" in code:
+                    return 1
+                if "==" in code or " if " in code:
+                    return 2
+                return 1
+
         evaluation_service.executor = FakeExecutor()
-        hint_service.generate_hint = FakeHintService().generate_hint
+        fake_hint_service = FakeHintService()
+        hint_service.generate_hint = fake_hint_service.generate_hint
+        hint_service.classify_failure_stage = fake_hint_service.classify_failure_stage
         cls.client = TestClient(app)
 
     def setUp(self) -> None:
@@ -347,12 +406,12 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(hints.status_code, 403)
         self.assertEqual(hints.json()["detail"], "No hints unlocked yet.")
 
-    def test_answer_key_unlocks_after_four_valid_failed_submits(self) -> None:
+    def test_answer_key_unlocks_after_three_valid_failed_submits(self) -> None:
         # Repeated valid failed submits should escalate support gradually until
         # the answer key becomes available.
         self._login("student@codesocrat.dev", "studentpass")
 
-        for _ in range(4):
+        for _ in range(3):
             response = self._submit("sum_two_numbers", "def add_numbers(a, b):\n    return a - b\n")
             self.assertEqual(response.status_code, 200)
 
@@ -424,10 +483,9 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(hints.status_code, 200)
         self.assertEqual(hints.json()["highlight_stage"], 3)
 
-    def test_new_syntax_failure_refreshes_syntactic_hint_for_latest_submission(self) -> None:
-        # A later syntax error should replace the old syntactic hint content
-        # with feedback generated from the latest official submit, but only
-        # after the learner has already revealed that hint type before.
+    def test_new_syntax_failure_requires_unlock_again_for_latest_syntactic_hint(self) -> None:
+        # A later syntax error should require the learner to click Unlock Hint
+        # again before the refreshed syntactic hint is revealed.
         from app.models import GeneratedHint, Problem, Submission, User
 
         self._login("student@codesocrat.dev", "studentpass")
@@ -445,7 +503,11 @@ class BackendFlowTests(unittest.TestCase):
         refreshed_hints = self.client.get("/hints", params={"problem_id": "sum_two_numbers"})
         self.assertEqual(refreshed_hints.status_code, 200)
         self.assertEqual(refreshed_hints.json()["highlight_stage"], 3)
-        self.assertEqual(refreshed_hints.json()["syntactic"], "generated-stage-3")
+        self.assertIsNone(refreshed_hints.json()["syntactic"])
+
+        reopened_hint = self.client.get("/hints", params={"problem_id": "sum_two_numbers", "stage": 3})
+        self.assertEqual(reopened_hint.status_code, 200)
+        self.assertEqual(reopened_hint.json()["syntactic"], "generated-stage-3")
 
         db = self.SessionLocal()
         try:
@@ -526,6 +588,90 @@ class BackendFlowTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["result"], "Fail")
         self.assertEqual(payload["failure_category"], "IncorrectOutput")
+
+    def test_is_even_near_miss_logic_unlocks_strategic_hint(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+
+        response = self._submit("is_even_number", "def is_even(n):\n    return n % 2 == 3\n")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["result"], "Fail")
+        self.assertEqual(payload["failure_category"], "IncorrectOutput")
+        self.assertEqual(payload["hint_stage_unlocked"], 2)
+
+        hints = self.client.get("/hints", params={"problem_id": "is_even_number"})
+        self.assertEqual(hints.status_code, 200)
+        self.assertEqual(hints.json()["highlight_stage"], 2)
+        self.assertEqual(hints.json()["unlocked_stages"], [2])
+        self.assertIsNone(hints.json()["strategic"])
+
+    def test_is_even_wrong_rule_unlocks_only_conceptual_hint(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+
+        response = self._submit("is_even_number", "def is_even(n):\n    return n % 3 == 0\n")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["result"], "Fail")
+        self.assertEqual(payload["failure_category"], "IncorrectOutput")
+        self.assertEqual(payload["hint_stage_unlocked"], 1)
+
+        hints = self.client.get("/hints", params={"problem_id": "is_even_number"})
+        self.assertEqual(hints.status_code, 200)
+        self.assertEqual(hints.json()["highlight_stage"], 1)
+        self.assertEqual(hints.json()["unlocked_stages"], [1])
+        self.assertIsNone(hints.json()["conceptual"])
+
+    def test_revealed_hint_stays_visible_after_another_hint_unlocks(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+
+        first_submit = self._submit("is_even_number", "def is_even(n):\n    return n + 2\n")
+        self.assertEqual(first_submit.status_code, 200)
+        self.assertEqual(first_submit.json()["hint_stage_unlocked"], 1)
+
+        conceptual = self.client.get("/hints", params={"problem_id": "is_even_number", "stage": 1})
+        self.assertEqual(conceptual.status_code, 200)
+        self.assertEqual(conceptual.json()["conceptual"], "generated-stage-1")
+
+        second_submit = self._submit("is_even_number", "def is_even(n):\n    return n % 2 == 3\n")
+        self.assertEqual(second_submit.status_code, 200)
+        self.assertEqual(second_submit.json()["hint_stage_unlocked"], 2)
+
+        hints = self.client.get("/hints", params={"problem_id": "is_even_number"})
+        self.assertEqual(hints.status_code, 200)
+        self.assertEqual(hints.json()["highlight_stage"], 2)
+        self.assertEqual(hints.json()["unlocked_stages"], [2])
+        self.assertEqual(hints.json()["revealed_stages"], [1])
+        self.assertEqual(hints.json()["conceptual"], "generated-stage-1")
+        self.assertIsNone(hints.json()["strategic"])
+
+        strategic = self.client.get("/hints", params={"problem_id": "is_even_number", "stage": 2})
+        self.assertEqual(strategic.status_code, 200)
+        self.assertEqual(strategic.json()["conceptual"], "generated-stage-1")
+        self.assertEqual(strategic.json()["strategic"], "generated-stage-2")
+
+    def test_new_strategic_failure_requires_unlock_again_for_refreshed_hint(self) -> None:
+        self._login("student@codesocrat.dev", "studentpass")
+
+        first_submit = self._submit("is_even_number", "def is_even(n):\n    return n % 2 == 3\n")
+        self.assertEqual(first_submit.status_code, 200)
+        self.assertEqual(first_submit.json()["hint_stage_unlocked"], 2)
+
+        first_hint = self.client.get("/hints", params={"problem_id": "is_even_number", "stage": 2})
+        self.assertEqual(first_hint.status_code, 200)
+        self.assertEqual(first_hint.json()["strategic"], "generated-stage-2")
+
+        second_submit = self._submit("is_even_number", "def is_even(n):\n    return n % 2 == -1\n")
+        self.assertEqual(second_submit.status_code, 200)
+        self.assertEqual(second_submit.json()["hint_stage_unlocked"], 2)
+
+        hints = self.client.get("/hints", params={"problem_id": "is_even_number"})
+        self.assertEqual(hints.status_code, 200)
+        self.assertEqual(hints.json()["unlocked_stages"], [2])
+        self.assertIsNone(hints.json()["strategic"])
+
+        refreshed_hint = self.client.get("/hints", params={"problem_id": "is_even_number", "stage": 2})
+        self.assertEqual(refreshed_hint.status_code, 200)
+        self.assertEqual(refreshed_hint.json()["strategic"], "generated-stage-2")
 
     def test_author_uploads_problem(self) -> None:
         # Authors can create custom problems directly from structured JSON in

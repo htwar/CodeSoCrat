@@ -116,7 +116,7 @@ npm run build
 
 ## Hint provider setup
 
-Hint generation is provider-based now. Ollama is the default local provider, but the backend can switch providers through environment variables.
+Hint generation is provider-based now. Ollama is the default built-in provider, and the backend is structured so another LLM can be added by implementing the shared hint-service interface and registering it in the provider factory.
 
 For Ollama:
 
@@ -125,15 +125,6 @@ CODESOCRAT_HINT_PROVIDER=ollama
 CODESOCRAT_OLLAMA_BASE_URL=http://127.0.0.1:11434
 CODESOCRAT_HINT_MODEL=qwen2.5-coder:14b
 ```
-
-For GPT4All:
-
-```env
-CODESOCRAT_HINT_PROVIDER=gpt4all
-CODESOCRAT_GPT4ALL_MODEL_PATH=/absolute/path/to/your-model.gguf
-```
-
-If you use GPT4All, install the `gpt4all` Python package in the backend environment first.
 
 ## Author problem format
 

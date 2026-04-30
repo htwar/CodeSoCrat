@@ -511,7 +511,7 @@ function SubmissionPanel({
               <span>Last Action: {submissionState.result.execution_type}</span>
               <span>Failure Category: {submissionState.result.failure_category || "None"}</span>
               <span>Runtime: {submissionState.result.runtime_ms} ms</span>
-              <span>Highest Hint Type: {HINT_TYPE_LABELS[submissionState.result.hint_stage_unlocked] || "None"}</span>
+              <span>Unlocked Hint Type: {HINT_TYPE_LABELS[submissionState.result.hint_stage_unlocked] || "None"}</span>
               <span>Valid Failed Attempts: {submissionState.result.valid_failed_attempts}</span>
             </div>
           </div>
@@ -542,19 +542,21 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
   const content = hints[stageKey];
   const contentLines = normalizeHintLines(content);
   const unlockedStages = hints.unlocked_stages || [];
+  const revealedStages = hints.revealed_stages || [];
   const isUnlocked = unlockedStages.includes(stage);
-  const isHighlighted = isUnlocked && hints.highlight_stage === stage;
+  const isRevealed = revealedStages.includes(stage) && Boolean(content);
+  const isHighlighted = (isUnlocked || isRevealed) && hints.highlight_stage === stage;
   const isLoading = hintState.loadingStage === stage;
 
   return (
-    <article className={["hint-card", content ? "unlocked" : "locked", isHighlighted ? "highlighted" : ""].join(" ").trim()} aria-live={content ? "polite" : "off"}>
+    <article className={["hint-card", isRevealed ? "unlocked" : "locked", isHighlighted ? "highlighted" : ""].join(" ").trim()} aria-live={content ? "polite" : "off"}>
       <div className="hint-card-header">
         <div>
           <p className="hint-kicker">{title} Hint</p>
           <h3>{title}</h3>
         </div>
-        <span className={isUnlocked ? "hint-status unlocked" : "hint-status locked"}>
-          {content ? "Revealed" : isUnlocked ? "Ready" : "Locked"}
+        <span className={isUnlocked || isRevealed ? "hint-status unlocked" : "hint-status locked"}>
+          {isRevealed ? "Revealed" : isUnlocked ? "Ready" : "Locked"}
         </span>
       </div>
       <p className="hint-summary">
@@ -579,7 +581,7 @@ function HintCard({ title, stage, hintState, onUnlockHint }) {
             : "Locked until you earn this hint type."}
         </p>
       )}
-      {isUnlocked && !content ? (
+      {isUnlocked && !isRevealed ? (
         <button type="button" className="secondary-button" onClick={() => onUnlockHint(stage)} disabled={isLoading}>
           {isLoading ? "Unlocking..." : "Unlock Hint"}
         </button>
@@ -613,14 +615,14 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
       ) : (
         <p>
           {isUnlocked
-            ? "You have earned the answer key for this problem. Reveal it when you are ready to compare your work."
-            : "Locked until you reach four valid failed Submit attempts on this problem."}
+            ? "You have earned the answer key for this problem. Unlock it when you are ready to compare your work."
+            : "Locked until you reach three valid failed Submit attempts on this problem."}
         </p>
       )}
       {answerKeyState.error ? <p className="error-text" role="alert">{answerKeyState.error}</p> : null}
       {isUnlocked && !hasContent ? (
         <button type="button" className="secondary-button" onClick={onViewAnswerKey} disabled={answerKeyState.loading}>
-          {answerKeyState.loading ? "Loading..." : "View Answer Key"}
+          {answerKeyState.loading ? "Unlocking..." : "Unlock Answer Key"}
         </button>
       ) : null}
     </article>
@@ -633,7 +635,6 @@ function AuthorPanel({
   onAuthorFilterChange,
   authorEditor,
   onAuthorEditorChange,
-  onLoadJsonFile,
   onUploadJsonFile,
   onCreateNew,
   onSelectProblem,
@@ -645,7 +646,6 @@ function AuthorPanel({
 }) {
   // Author-only dashboard for browsing starter/custom problems and editing
   // custom JSON payloads.
-  const loadFileInputRef = useRef(null);
   const uploadFileInputRef = useRef(null);
   const authorEditorOptions = {
     ariaLabel: "Problem JSON editor",
@@ -743,21 +743,6 @@ function AuthorPanel({
           Upload a `.json` file or edit the payload directly. Starter problems stay read-only; only your own custom problems can be edited, disabled, or deleted.
         </p>
         <div className="author-toolbar">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => loadFileInputRef.current?.click()}
-          >
-            Load JSON Into Editor
-          </button>
-          <input
-            ref={loadFileInputRef}
-            className="sr-only-input"
-            type="file"
-            accept="application/json,.json"
-            onChange={onLoadJsonFile}
-            aria-label="Load a JSON problem file into the editor"
-          />
           <button
             type="button"
             className="secondary-button"
@@ -1337,6 +1322,7 @@ export default function App() {
             problem_id: problemId,
             unlocked_stage: 0,
             unlocked_stages: [],
+            revealed_stages: [],
             highlight_stage: null,
             conceptual: null,
             strategic: null,
@@ -1351,13 +1337,14 @@ export default function App() {
   }
 
   async function refreshAnswerKeyState(problemId) {
-    // Re-check whether the answer key is unlocked and cache it if visible.
+    // Re-check whether the answer key is unlocked without automatically
+    // revealing its content.
     try {
       const response = await getAnswerKey(problemId);
       setAnswerKeyState({
         unlocked: response.unlocked,
         loading: false,
-        content: response.unlocked ? response : null,
+        content: null,
         error: "",
       });
     } catch (answerKeyError) {
@@ -1480,6 +1467,7 @@ export default function App() {
           problem_id: selectedProblem.problem_id,
           unlocked_stage: 0,
           unlocked_stages: [],
+          revealed_stages: [],
           highlight_stage: null,
           conceptual: null,
           strategic: null,
@@ -1568,26 +1556,6 @@ export default function App() {
     } catch (loadError) {
       setAuthorEditor((current) => ({ ...current, loading: false, error: loadError.message }));
     }
-  }
-
-  function handleAuthorFileLoad(event) {
-    // Read a local JSON file into the editor without uploading it yet.
-    // Read a local JSON file into the editor without uploading it yet.
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const fileText = typeof reader.result === "string" ? reader.result : "";
-      resetAuthorEditor(fileText || starterUploadTemplate);
-    };
-    reader.onerror = () => {
-      setAuthorEditor((current) => ({ ...current, error: "The selected JSON file could not be read." }));
-    };
-    reader.readAsText(file);
-    event.target.value = "";
   }
 
   async function handleAuthorFileUpload(event) {
@@ -1779,7 +1747,6 @@ export default function App() {
           onAuthorFilterChange={setAuthorFilter}
           authorEditor={authorEditor}
           onAuthorEditorChange={(jsonText) => setAuthorEditor((current) => ({ ...current, jsonText, message: "", error: "" }))}
-          onLoadJsonFile={handleAuthorFileLoad}
           onUploadJsonFile={handleAuthorFileUpload}
           onCreateNew={() => resetAuthorEditor()}
           onSelectProblem={handleLoadAuthorProblem}

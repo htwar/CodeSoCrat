@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -30,6 +31,8 @@ class ProgressService:
         result: str,
         failure_category: Optional[str],
         valid_attempt: bool,
+        code: Optional[str] = None,
+        needed_stage: Optional[int] = None,
     ) -> UserProblemProgress:
         # "Run" is practice mode; only full submits change durable progress.
         if execution_type != "Submit":
@@ -44,35 +47,53 @@ class ProgressService:
             return progress
 
         progress.last_failure_category = failure_category
+        effective_stage = needed_stage or self.infer_needed_stage(
+            failure_category=failure_category,
+            code=code,
+        )
+
+        progress.unlocked_stage = effective_stage
 
         if valid_attempt:
             progress.valid_failed_attempts += 1
-        # The SRS unlocks the answer key after four valid failed submits for
-        # the same user/problem pair.
-        if progress.valid_failed_attempts >= 4:
-            progress.answer_key_unlocked = True
 
-        progress.unlocked_stage = max(self.get_unlocked_stages(progress), default=0)
+        if progress.valid_failed_attempts >= 3:
+            progress.answer_key_unlocked = True
 
         return progress
 
+    def infer_needed_stage(self, *, failure_category: Optional[str], code: Optional[str]) -> int:
+        if failure_category in {"SyntaxError", "DefinitionError"}:
+            return 3
+        if failure_category in {"RuntimeError", "TimeLimitExceeded"}:
+            return 2
+        if failure_category == "IncorrectOutput":
+            return 1
+        if not code:
+            return 1
+
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return 1
+
+        strategic_nodes = (ast.Compare, ast.BoolOp, ast.If, ast.IfExp)
+        uses_strategy_structure = any(isinstance(node, strategic_nodes) for node in ast.walk(tree))
+        if uses_strategy_structure:
+            return 2
+        return 1
+
     def get_unlocked_stages(self, progress: UserProblemProgress) -> set[int]:
-        # Hint stages unlock progressively, with syntax issues fast-tracking the
-        # syntactic hint so students can get unstuck sooner.
+        # The current submission only unlocks the one hint type that best
+        # matches the learner's active blocker. Previously revealed hints are
+        # surfaced separately by the hint cache, not by widening this set.
         if progress.completed:
             return set()
 
         unlocked_stages: set[int] = set()
 
-        if progress.valid_failed_attempts >= 1:
-            unlocked_stages.add(1)
-        if progress.valid_failed_attempts >= 2:
-            unlocked_stages.add(2)
-        if progress.valid_failed_attempts >= 3:
-            unlocked_stages.add(3)
-
-        if progress.last_failure_category in {"SyntaxError", "DefinitionError"}:
-            unlocked_stages.add(3)
+        if progress.unlocked_stage:
+            unlocked_stages.add(progress.unlocked_stage)
 
         return unlocked_stages
 
