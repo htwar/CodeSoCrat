@@ -13,9 +13,12 @@ from app.schemas import ProblemUploadPayload
 
 def seed_default_users(db: Session) -> None:
     # Keep predictable demo accounts available for local development and demos.
+    if not settings.seed_demo_users:
+        return
+
     defaults = [
-        ("student@codesocrat.dev", "studentpass", "Student", "Student Demo"),
-        ("author@codesocrat.dev", "authorpass", "Author", "Author Demo"),
+        (settings.demo_student_email, settings.demo_student_password, "Student", "Student Demo"),
+        (settings.demo_author_email, settings.demo_author_password, "Author", "Author Demo"),
     ]
     for email, password, role, display_name in defaults:
         existing = db.query(User).filter(User.email == email).first()

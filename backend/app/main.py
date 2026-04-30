@@ -48,12 +48,12 @@ from app.security import validate_email
 from app.config import settings
 from app.services.bootstrap import persist_problem, replace_problem_contents, seed_default_users, seed_starter_problems
 from app.services.evaluation import EvaluationService
-from app.services.hints import HintContext, OllamaHintService, cache_generated_hint
+from app.services.hints import HintContext, build_hint_service, cache_generated_hint
 from app.services.progress import ProgressService
 
 evaluation_service = EvaluationService()
 progress_service = ProgressService()
-hint_service = OllamaHintService()
+hint_service = build_hint_service()
 
 
 # Application startup seeds demo users and starter problems so the local app is
@@ -350,7 +350,10 @@ def google_auth(payload: GoogleAuthRequest, response: Response, db: Session = De
     if user is None:
         user = User(
             email=email,
-            password_hash=None,
+            # Older local SQLite databases may still enforce NOT NULL on this
+            # column, so Google-only accounts store an empty placeholder
+            # instead of a usable local password hash.
+            password_hash="",
             role="Student",
             auth_provider="google",
             google_sub=str(claims["sub"]),

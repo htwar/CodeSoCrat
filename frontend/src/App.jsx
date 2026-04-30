@@ -54,13 +54,7 @@ const starterUploadTemplate = `{
   }
 }`;
 
-const demoSolution = "def add_numbers(a, b):\n    return a + b\n";
 const DIFFICULTIES = ["Easy", "Medium", "Hard"];
-const TIME_LIMITS = {
-  Easy: 5 * 60,
-  Medium: 10 * 60,
-  Hard: 15 * 60,
-};
 const AUTHOR_FILTERS = [
   { id: "all", label: "All visible" },
   { id: "starter", label: "Starter only" },
@@ -77,6 +71,18 @@ const HINT_TYPE_SUMMARIES = {
   2: "Use this to choose your next debugging or problem-solving step.",
   3: "Use this to inspect the code shape, syntax, or exact failing area.",
 };
+const DEMO_ACCOUNTS = [
+  {
+    label: "Student demo",
+    email: import.meta.env.VITE_DEMO_STUDENT_EMAIL || "",
+    password: import.meta.env.VITE_DEMO_STUDENT_PASSWORD || "",
+  },
+  {
+    label: "Author demo",
+    email: import.meta.env.VITE_DEMO_AUTHOR_EMAIL || "",
+    password: import.meta.env.VITE_DEMO_AUTHOR_PASSWORD || "",
+  },
+].filter((account) => account.email && account.password);
 const WORKSPACE_STORAGE_PREFIX = "codesocrat_workspace_v1";
 
 function formatSeconds(totalSeconds) {
@@ -94,7 +100,12 @@ function getWorkspaceStorageKey(userId) {
 }
 
 function getExpectedTimeLimit(problem) {
-  return TIME_LIMITS[problem.difficulty] || TIME_LIMITS.Easy;
+  const timeLimits = {
+    Easy: Number(import.meta.env.VITE_TIMED_MODE_EASY_SECONDS || 60),
+    Medium: Number(import.meta.env.VITE_TIMED_MODE_MEDIUM_SECONDS || 180),
+    Hard: Number(import.meta.env.VITE_TIMED_MODE_HARD_SECONDS || 300),
+  };
+  return Math.max(1, timeLimits[problem?.difficulty] || timeLimits.Easy);
 }
 
 function normalizeHintLines(content) {
@@ -115,14 +126,21 @@ function normalizeHintLines(content) {
     });
 }
 
+function formatCodeLines(code) {
+  if (!code) {
+    return [];
+  }
+  return code.split("\n");
+}
+
 function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, loading, error }) {
   // Authentication screen shared by local login, registration, and optional
   // Google sign-in.
   // Authentication screen shared by local login, registration, and optional
   // Google sign-in.
   const [mode, setMode] = useState("login");
-  const [email, setEmail] = useState("student@codesocrat.dev");
-  const [password, setPassword] = useState("studentpass");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const googleButtonRef = useRef(null);
 
@@ -238,10 +256,13 @@ function AuthPanel({ onLogin, onRegister, onGoogleCredential, googleConfig, load
       <p className="status-text" role="status" aria-live="polite">
         {error || ""}
       </p>
-      <div className="account-hints">
-        <span>Student demo: student@codesocrat.dev / studentpass</span>
-        <span>Author demo: author@codesocrat.dev / authorpass</span>
-      </div>
+      {DEMO_ACCOUNTS.length ? (
+        <div className="account-hints" aria-label="Demo accounts">
+          {DEMO_ACCOUNTS.map((account) => (
+            <span key={account.label}>{account.label}: {account.email} / {account.password}</span>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -281,6 +302,8 @@ function ProblemList({ problems, selectedDifficulty, selectedProblemId, onDiffic
             className={selectedProblemId === problem.problem_id ? "problem-item active" : "problem-item"}
             onClick={() => onSelect(problem.problem_id)}
             type="button"
+            aria-pressed={selectedProblemId === problem.problem_id}
+            aria-label={`${problem.title}, ${problem.difficulty}, ${problem.source === "starter" ? "starter problem" : "custom problem"}`}
           >
             <strong>{problem.title}</strong>
             <span>{problem.difficulty}</span>
@@ -299,8 +322,6 @@ function SubmissionPanel({
   onRun,
   onSubmit,
   onResetProgress,
-  onResetToStarter,
-  onLoadDemo,
   timedChallenge,
   onEnableTimedMode,
   onDisableTimedMode,
@@ -316,6 +337,7 @@ function SubmissionPanel({
   const editorOptions = {
     ariaLabel: problem ? `${problem.title} Python editor` : "Python editor",
     automaticLayout: true,
+    stickyScroll: { enabled: false },
     fontSize: 15,
     glyphMargin: false,
     lineNumbers: "on",
@@ -352,9 +374,6 @@ function SubmissionPanel({
             </div>
           </div>
           <div className="panel-actions">
-            <button type="button" className="secondary-button" onClick={onResetToStarter}>
-              Reset to Starter
-            </button>
             <button type="button" className="danger-button" onClick={onResetProgress}>
               Reset Progress
             </button>
@@ -475,9 +494,6 @@ function SubmissionPanel({
           >
             {submissionState.loadingAction === "Submit" ? "Submitting..." : "Submit"}
           </button>
-          <button type="button" className="ghost-button" onClick={onLoadDemo}>
-            Load Demo Pass
-          </button>
         </div>
         {timedChallenge.message ? <p className="success-text" role="status" aria-live="polite">{timedChallenge.message}</p> : null}
         {timedChallenge.status === "expired" ? (
@@ -576,6 +592,7 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
   // Final help panel that reveals the stored solution only after unlock.
   const isUnlocked = answerKeyState.unlocked;
   const hasContent = Boolean(answerKeyState.content);
+  const solutionLines = formatCodeLines(answerKeyState.content?.solution_code || "");
 
   return (
     <article className={["hint-card", hasContent ? "unlocked" : "locked", isUnlocked ? "highlighted" : ""].join(" ").trim()} aria-live={hasContent ? "polite" : "off"}>
@@ -583,25 +600,14 @@ function AnswerKeyCard({ answerKeyState, onViewAnswerKey }) {
       {hasContent ? (
         <>
           <p>{answerKeyState.content.explanation}</p>
-          <div className="editor-frame answer-key-frame">
-            <Editor
-              defaultLanguage="python"
-              language="python"
-              value={answerKeyState.content.solution_code}
-              options={{
-                ariaLabel: "Reference solution code viewer",
-                automaticLayout: true,
-                fontSize: 14,
-                lineNumbers: "on",
-                minimap: { enabled: false },
-                readOnly: true,
-                renderLineHighlight: "none",
-                scrollBeyondLastLine: false,
-                wordWrap: "on",
-              }}
-              theme="vs"
-              height="200px"
-            />
+          <div className="answer-key-code-block" role="region" aria-label="Reference solution code">
+            <ol className="answer-key-lines">
+              {solutionLines.map((line, index) => (
+                <li key={`answer-key-line-${index}`}>
+                  <code>{line || " "}</code>
+                </li>
+              ))}
+            </ol>
           </div>
         </>
       ) : (
@@ -644,6 +650,7 @@ function AuthorPanel({
   const authorEditorOptions = {
     ariaLabel: "Problem JSON editor",
     automaticLayout: true,
+    stickyScroll: { enabled: false },
     fontSize: 14,
     formatOnPaste: true,
     lineNumbers: "on",
@@ -1710,7 +1717,6 @@ export default function App() {
     return (
       <main className="app-shell auth-shell">
         <a className="skip-link" href="#auth-title">Skip to sign-in form</a>
-        <a className="skip-link" href="#auth-title">Skip to sign-in form</a>
         <AuthPanel
           onLogin={handleLogin}
           onRegister={handleRegister}
@@ -1726,7 +1732,6 @@ export default function App() {
   return (
     <main className="app-shell">
       <a className="skip-link" href="#workspace-panel">Skip to main workspace</a>
-      <a className="skip-link" href="#workspace-panel">Skip to main workspace</a>
       <header className="topbar">
         <div>
           <p className="eyebrow">Logged In</p>
@@ -1735,7 +1740,6 @@ export default function App() {
         </div>
         <div className="topbar-actions">
           <span>{session.role}</span>
-          <span className="auth-provider-pill">{session.auth_provider}</span>
           <button type="button" className="secondary-button" onClick={handleLogout}>
             Sign out
           </button>
@@ -1757,9 +1761,7 @@ export default function App() {
           onRun={() => executeCode("Run", { timedMode: Boolean(selectedTimedChallenge?.enabled) })}
           onSubmit={() => executeCode("Submit", { timedMode: Boolean(selectedTimedChallenge?.enabled) })}
           onResetProgress={handleResetProgress}
-          onResetToStarter={() => updateCode(selectedProblem?.starter_code || "")}
-          onLoadDemo={() => updateCode(demoSolution)}
-          timedChallenge={selectedTimedChallenge}
+          timedChallenge={selectedTimedChallenge || buildTimedChallenge(selectedProblem)}
           onEnableTimedMode={handleEnableTimedMode}
           onDisableTimedMode={handleDisableTimedMode}
           submissionState={submissionState}

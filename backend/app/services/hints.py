@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 from urllib import error, request
@@ -23,45 +25,12 @@ class HintContext:
     latest_submission: Optional[Submission]
 
 
-class OllamaHintService:
+class BaseHintService(ABC):
+    provider_name = "base"
+
+    @abstractmethod
     def generate_hint(self, *, stage: int, context: HintContext) -> str:
-        # Hint generation is stage-aware so the model reveals only the level of
-        # help the student has earned through failed submissions.
-        prompt = self._build_prompt(stage=stage, context=context)
-        payload = json.dumps(
-            {
-                "model": settings.ollama_model,
-                "prompt": prompt,
-                "stream": False,
-                "keep_alive": settings.ollama_keep_alive,
-                "options": {
-                    "num_predict": settings.ollama_hint_max_tokens,
-                    "temperature": 0.2,
-                },
-            }
-        ).encode("utf-8")
-        endpoint = f"{settings.ollama_base_url}/api/generate"
-        http_request = request.Request(
-            endpoint,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
-        try:
-            with request.urlopen(http_request, timeout=settings.ollama_timeout_seconds) as response:
-                body = json.loads(response.read().decode("utf-8"))
-        except error.URLError as exc:
-            raise RuntimeError(f"Ollama is unavailable at {settings.ollama_base_url}.") from exc
-        except TimeoutError as exc:
-            raise RuntimeError("Ollama hint generation timed out.") from exc
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("Ollama returned an unreadable hint response.") from exc
-
-        hint = (body.get("response") or "").strip()
-        if not hint:
-            raise RuntimeError("Ollama returned an empty hint.")
-        return hint
+        raise NotImplementedError
 
     def get_cached_hints(
         self,
@@ -105,9 +74,63 @@ class OllamaHintService:
             "syntactic": generated_hints.get(3) if 3 in unlocked_stages else None,
         }
 
+    def determine_highlight_stage(
+        self,
+        *,
+        unlocked_stages: set[int],
+        available_hints: dict[int, str],
+        context: HintContext,
+    ) -> Optional[int]:
+        # Prefer the next missing hint, but jump to syntax guidance first when
+        # the failure category shows the student is blocked by parsing issues.
+        missing_stages = [stage for stage in sorted(unlocked_stages) if stage not in available_hints]
+        if not missing_stages:
+            return min(unlocked_stages) if unlocked_stages else None
+
+        failure_category = context.latest_submission.failure_category if context.latest_submission is not None else context.progress.last_failure_category
+        if failure_category in {"SyntaxError", "DefinitionError"} and 3 in missing_stages:
+            return 3
+
+        for stage in missing_stages:
+            return stage
+        return None
+
+    def _sanitize_generated_hint(self, *, stage: int, hint: str, context: HintContext) -> str:
+        # Guard against over-revealing hints for beginner problems by stripping
+        # exact solution patterns from conceptual and strategic hints.
+        cleaned = " ".join(hint.split())
+        if stage not in {1, 2}:
+            return cleaned
+
+        lower_hint = cleaned.lower()
+        forbidden_markers = [
+            "return ",
+            "`return",
+            "use: return",
+            "replace it with",
+            "modulo 2",
+            "% 2",
+            "== 0",
+            "divided by 2",
+            "remainder of",
+        ]
+        if any(marker in lower_hint for marker in forbidden_markers):
+            hint_name = STAGE_LABELS[stage].lower()
+            if stage == 1:
+                return (
+                    f"This {hint_name} hint should stay high level. Focus on what property separates valid cases from invalid ones, "
+                    "and make sure the function returns a boolean answer instead of restating the full rule."
+                )
+            return (
+                f"This {hint_name} hint should guide the next step without giving the final condition away. "
+                "Re-check what relationship the function needs to test, then rewrite the return statement so it evaluates that property directly."
+            )
+
+        # Strip stray inline code fragments even when the rest of the hint is usable.
+        cleaned = re.sub(r"`[^`]+`", "that expression", cleaned)
+        return cleaned
+
     def _build_prompt(self, *, stage: int, context: HintContext) -> str:
-        # Assemble the prompt sent to Ollama, balancing problem context with
-        # strict anti-spoiler instructions for each hint stage.
         submission = context.latest_submission
         submission_code = self._build_submission_excerpt(submission.code if submission is not None else "")
         failure_category = submission.failure_category if submission is not None else context.progress.last_failure_category
@@ -158,6 +181,7 @@ class OllamaHintService:
                 "Do not provide the exact final return expression.",
                 "Do not provide a specific operator-and-constant rule unless the student has explicitly unlocked the answer key.",
                 "Do not name the final operator sequence unless the parser error already explicitly identifies it.",
+                "For conceptual and strategic hints, do not mention the exact arithmetic test, exact divisor, exact constant, or exact comparison needed for the final solution.",
                 "Do not mention any bug not supported by the evidence.",
                 "",
                 *problem_context,
@@ -188,26 +212,102 @@ class OllamaHintService:
             return collapsed
         return f"{collapsed[: limit - 3].rstrip()}..."
 
-    def determine_highlight_stage(
-        self,
-        *,
-        unlocked_stages: set[int],
-        available_hints: dict[int, str],
-        context: HintContext,
-    ) -> Optional[int]:
-        # Prefer the next missing hint, but jump to syntax guidance first when
-        # the failure category shows the student is blocked by parsing issues.
-        missing_stages = [stage for stage in sorted(unlocked_stages) if stage not in available_hints]
-        if not missing_stages:
-            return min(unlocked_stages) if unlocked_stages else None
 
-        failure_category = context.latest_submission.failure_category if context.latest_submission is not None else context.progress.last_failure_category
-        if failure_category in {"SyntaxError", "DefinitionError"} and 3 in missing_stages:
-            return 3
+class OllamaHintService(BaseHintService):
+    provider_name = "ollama"
 
-        for stage in missing_stages:
-            return stage
-        return None
+    def generate_hint(self, *, stage: int, context: HintContext) -> str:
+        prompt = self._build_prompt(stage=stage, context=context)
+        payload = json.dumps(
+            {
+                "model": settings.hint_model or settings.ollama_model,
+                "prompt": prompt,
+                "stream": False,
+                "keep_alive": settings.ollama_keep_alive,
+                "options": {
+                    "num_predict": settings.ollama_hint_max_tokens,
+                    "temperature": 0.2,
+                },
+            }
+        ).encode("utf-8")
+        endpoint = f"{settings.ollama_base_url}/api/generate"
+        http_request = request.Request(
+            endpoint,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with request.urlopen(http_request, timeout=settings.ollama_timeout_seconds) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except error.URLError as exc:
+            raise RuntimeError(f"Ollama is unavailable at {settings.ollama_base_url}.") from exc
+        except TimeoutError as exc:
+            raise RuntimeError("Ollama hint generation timed out.") from exc
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Ollama returned an unreadable hint response.") from exc
+
+        hint = (body.get("response") or "").strip()
+        if not hint:
+            raise RuntimeError("Ollama returned an empty hint.")
+        return self._sanitize_generated_hint(stage=stage, hint=hint, context=context)
+
+
+class GPT4AllHintService(BaseHintService):
+    provider_name = "gpt4all"
+
+    def generate_hint(self, *, stage: int, context: HintContext) -> str:
+        model_name = settings.gpt4all_model_path or settings.hint_model
+        if not model_name:
+            raise RuntimeError("Set CODESOCRAT_GPT4ALL_MODEL_PATH or CODESOCRAT_HINT_MODEL before using the GPT4All hint provider.")
+
+        try:
+            from gpt4all import GPT4All
+        except ImportError as exc:
+            raise RuntimeError("GPT4All support requires the `gpt4all` package to be installed in the backend environment.") from exc
+
+        prompt = self._build_prompt(stage=stage, context=context)
+
+        try:
+            model = GPT4All(
+                model_name=model_name,
+                device=settings.gpt4all_device,
+                allow_download=settings.gpt4all_allow_download,
+            )
+        except TypeError:
+            # Older GPT4All builds do not expose `allow_download`.
+            model = GPT4All(
+                model_name=model_name,
+                device=settings.gpt4all_device,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"GPT4All could not load the model `{model_name}`.") from exc
+
+        try:
+            with model.chat_session():
+                hint = model.generate(
+                    prompt,
+                    max_tokens=settings.ollama_hint_max_tokens,
+                    temp=0.2,
+                    n_threads=settings.gpt4all_threads,
+                )
+        except Exception as exc:
+            raise RuntimeError("GPT4All hint generation failed.") from exc
+
+        hint_text = str(hint).strip()
+        if not hint_text:
+            raise RuntimeError("GPT4All returned an empty hint.")
+        return self._sanitize_generated_hint(stage=stage, hint=hint_text, context=context)
+
+
+def build_hint_service() -> BaseHintService:
+    provider = settings.hint_provider.lower()
+    if provider == "ollama":
+        return OllamaHintService()
+    if provider == "gpt4all":
+        return GPT4AllHintService()
+    raise RuntimeError(f"Unsupported hint provider `{settings.hint_provider}`.")
 
 
 def cache_generated_hint(*, db, user: User, problem: Problem, submission: Submission, stage: int, content: str) -> GeneratedHint:

@@ -1,5 +1,6 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8000`;
-const CSRF_COOKIE_NAME = "codesocrat_csrf";
+const CSRF_COOKIE_NAME = import.meta.env.VITE_CSRF_COOKIE_NAME || "codesocrat_csrf";
+const CSRF_HEADER_NAME = import.meta.env.VITE_CSRF_HEADER_NAME || "X-CSRF-Token";
 
 // Read the CSRF token from the browser cookie so state-changing requests can
 // include it automatically.
@@ -51,7 +52,7 @@ async function request(path, options = {}) {
   if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
     const csrfToken = getCookie(CSRF_COOKIE_NAME);
     if (csrfToken) {
-      csrfHeaders["X-CSRF-Token"] = csrfToken;
+      csrfHeaders[CSRF_HEADER_NAME] = csrfToken;
     }
   }
   const response = await fetch(`${API_BASE_URL}${path}`, {

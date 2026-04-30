@@ -7,7 +7,7 @@ The project uses:
 - React + Vite on the frontend
 - FastAPI + SQLAlchemy on the backend
 - Docker to run student code in an isolated Python sandbox
-- Ollama for hint generation
+- a configurable local LLM provider layer for hint generation
 - SQLite for local development and PostgreSQL for deployment
 
 ## What it does
@@ -49,8 +49,9 @@ Create a `.env` file in the project root. A minimal local setup looks like this:
 CODESOCRAT_DATABASE_URL=sqlite:///./codesocrat.db
 CODESOCRAT_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 CODESOCRAT_SESSION_COOKIE_SECURE=false
+CODESOCRAT_HINT_PROVIDER=ollama
 CODESOCRAT_OLLAMA_BASE_URL=http://127.0.0.1:11434
-CODESOCRAT_OLLAMA_MODEL=qwen2.5-coder:14b
+CODESOCRAT_HINT_MODEL=qwen2.5-coder:14b
 ```
 
 If you want Google sign-in, also add:
@@ -65,6 +66,8 @@ Create `frontend/.env` with:
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000
+VITE_CSRF_COOKIE_NAME=codesocrat_csrf
+VITE_CSRF_HEADER_NAME=X-CSRF-Token
 ```
 
 If you use cookie auth locally, keep the frontend and backend on the same hostname. For example:
@@ -110,6 +113,27 @@ Frontend build check:
 cd frontend
 npm run build
 ```
+
+## Hint provider setup
+
+Hint generation is provider-based now. Ollama is the default local provider, but the backend can switch providers through environment variables.
+
+For Ollama:
+
+```env
+CODESOCRAT_HINT_PROVIDER=ollama
+CODESOCRAT_OLLAMA_BASE_URL=http://127.0.0.1:11434
+CODESOCRAT_HINT_MODEL=qwen2.5-coder:14b
+```
+
+For GPT4All:
+
+```env
+CODESOCRAT_HINT_PROVIDER=gpt4all
+CODESOCRAT_GPT4ALL_MODEL_PATH=/absolute/path/to/your-model.gguf
+```
+
+If you use GPT4All, install the `gpt4all` Python package in the backend environment first.
 
 ## Author problem format
 
@@ -177,7 +201,18 @@ The app currently includes:
 
 ## Demo accounts
 
-For local development, starter users are seeded automatically:
+Local demo users are optional. By default the backend seeds one student account and one author account for development, but you can change or disable them with environment variables:
 
-- `student@codesocrat.dev` / `studentpass`
-- `author@codesocrat.dev` / `authorpass`
+```env
+CODESOCRAT_SEED_DEMO_USERS=true
+CODESOCRAT_DEMO_STUDENT_EMAIL=student@codesocrat.dev
+CODESOCRAT_DEMO_STUDENT_PASSWORD=studentpass
+CODESOCRAT_DEMO_AUTHOR_EMAIL=author@codesocrat.dev
+CODESOCRAT_DEMO_AUTHOR_PASSWORD=authorpass
+```
+
+If you do not want seeded demo users, set:
+
+```env
+CODESOCRAT_SEED_DEMO_USERS=false
+```

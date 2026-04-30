@@ -282,6 +282,46 @@ class UnitServiceTests(unittest.TestCase):
         self.assertEqual(generated[1], "Older conceptual hint")
         self.assertEqual(generated[2], "Latest strategic hint")
 
+    def test_conceptual_hint_sanitizer_removes_exact_solution_rule(self) -> None:
+        # Conceptual hints should not leak the solved condition for a simple
+        # beginner problem.
+        from app.models import Problem, UserProblemProgress
+        from app.services.hints import HintContext, OllamaHintService
+
+        service = OllamaHintService()
+        context = HintContext(
+            problem=Problem(
+                id=1,
+                problem_id="is_even_number",
+                title="Is Even Number",
+                prompt="Write a function named is_even(n) that returns True when n is even and False otherwise.",
+                difficulty="Easy",
+                function_name="is_even",
+                source="starter",
+                is_active=True,
+                is_deleted=False,
+            ),
+            progress=UserProblemProgress(
+                user_id=1,
+                problem_id=1,
+                valid_failed_attempts=1,
+                answer_key_unlocked=False,
+                unlocked_stage=1,
+                completed=False,
+            ),
+            latest_submission=None,
+        )
+
+        sanitized = service._sanitize_generated_hint(
+            stage=1,
+            hint="Ensure that the expression n % 2 == 0 is used to check if n is even, and include a return statement.",
+            context=context,
+        )
+
+        self.assertNotIn("% 2", sanitized)
+        self.assertNotIn("== 0", sanitized)
+        self.assertNotIn("return statement", sanitized.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
