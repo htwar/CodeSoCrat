@@ -967,11 +967,14 @@ def delete_problem(
     db: Session = Depends(get_db),
 ) -> ProblemUpdateResponse:
     problem = _get_manageable_problem(problem_id, user=user, db=db)
-    problem.is_active = False
-    problem.is_deleted = True
+    response_payload = ProblemUpdateResponse(success=True, problem_id=problem.problem_id, is_active=False, is_deleted=True)
+
+    db.query(GeneratedHint).filter(GeneratedHint.problem_id == problem.id).delete(synchronize_session=False)
+    db.query(UserProblemProgress).filter(UserProblemProgress.problem_id == problem.id).delete(synchronize_session=False)
+    db.query(Submission).filter(Submission.problem_id == problem.id).delete(synchronize_session=False)
+    db.delete(problem)
     db.commit()
-    db.refresh(problem)
-    return ProblemUpdateResponse(success=True, problem_id=problem.problem_id, is_active=problem.is_active, is_deleted=problem.is_deleted)
+    return response_payload
 
 
 @app.delete("/progress/{problem_id}", response_model=ResetProgressResponse)

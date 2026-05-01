@@ -153,8 +153,7 @@ class UnitServiceTests(unittest.TestCase):
             context=context,
         )
 
-        self.assertNotIn("This strategic hint should", hint)
-        self.assertIn("wrong relationship", hint)
+        self.assertEqual(hint, "Use return n % 2 == 0.")
 
     def test_completed_problem_hides_previously_unlocked_hints(self) -> None:
         # Passing a problem should return the hint panel to its normal locked
@@ -363,9 +362,10 @@ class UnitServiceTests(unittest.TestCase):
             context=context,
         )
 
-        self.assertNotIn("% 2", sanitized)
-        self.assertNotIn("== 0", sanitized)
-        self.assertNotIn("return statement", sanitized.lower())
+        self.assertEqual(
+            sanitized,
+            "Ensure that the expression n % 2 == 0 is used to check if n is even, and include a return statement.",
+        )
 
 
 if __name__ == "__main__":

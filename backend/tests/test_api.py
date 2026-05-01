@@ -832,6 +832,25 @@ class BackendFlowTests(unittest.TestCase):
         self.assertEqual(delete.status_code, 200)
         self.assertTrue(delete.json()["is_deleted"])
 
+        missing_after_delete = self.client.get("/author/problems/triple_number")
+        self.assertEqual(missing_after_delete.status_code, 404)
+
+        reupload = self.client.post(
+            "/author/problems/upload",
+            headers=self._csrf_headers(),
+            json={
+                "problem_id": "triple_number",
+                "title": "Triple Number Again",
+                "prompt": "Return three times the number again.",
+                "difficulty": "Easy",
+                "function_name": "triple_number",
+                "starter_code": "def triple_number(n):\n    pass\n",
+                "example_cases": [{"input": [2], "expected": 6}],
+                "test_cases": [{"input": [3], "expected": 9}],
+            },
+        )
+        self.assertEqual(reupload.status_code, 200)
+
     def test_author_cannot_modify_starter_problem(self) -> None:
         self._login("author@codesocrat.dev", "authorpass")
         response = self.client.post("/author/problems/sum_two_numbers/disable", headers=self._csrf_headers())

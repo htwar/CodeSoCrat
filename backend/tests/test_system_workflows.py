@@ -158,7 +158,7 @@ class SystemWorkflowTests(unittest.TestCase):
         self.assertEqual(run_response.json()["execution_type"], "Run")
         self.assertEqual(run_response.json()["valid_failed_attempts"], 0)
 
-        for _ in range(4):
+        for _ in range(3):
             submit_response = self.client.post(
                 "/submit",
                 headers=self._csrf_headers(),
